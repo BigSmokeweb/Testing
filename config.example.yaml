@@ -1,0 +1,23 @@
+base_url: "https://your-company-site.example.com"
+login_url_hints:
+  - "login"
+  - "signin"
+  - "okta"
+  - "microsoftonline"
+  - "accounts.google"
+allowed_domains:
+  - "your-company-site.example.com"
+never_click:
+  - "delete"
+  - "remove"
+  - "pay"
+  - "place order"
+  - "submit order"
+  - "logout"
+  - "sign out"
+extra_headers: {}
+alert:
+  type: "none"
+  slack_webhook: ""
+engines:
+  - chromium
