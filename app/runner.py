@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import datetime
 import importlib.util
 from pathlib import Path
 import sys
@@ -8,9 +9,12 @@ from playwright.sync_api import sync_playwright
 
 from app.config import load_config
 from app.monitors import MonitorCollector, attach, record_load_time
+from app.session import is_valid as is_session_valid
+from app.models import save_run, init_db
 
 AUTH_STATE_PATH = Path("auth/state.json")
 ARTIFACTS_DIR = Path("artifacts")
+FLOWS_DIR = Path("flows")
 
 
 @dataclass
@@ -33,6 +37,7 @@ class FlowResult:
     console_errors: List[dict] = field(default_factory=list)
     network_failures: List[dict] = field(default_factory=list)
     page_load_time_ms: Optional[int] = None
+    file_path: Optional[str] = None
 
 
 def load_flow_module(flow_path: str):
@@ -155,6 +160,7 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
             for fail in collector.network_failures
         ],
         page_load_time_ms=collector.page_load_time_ms,
+        file_path=str(Path(module.__file__).as_posix()),
     )
 
 
@@ -179,9 +185,9 @@ def run_flow(flow_path: str, engine: str = "chromium") -> FlowResult:
             console_errors=res1.console_errors + res2.console_errors,
             network_failures=res1.network_failures + res2.network_failures,
             page_load_time_ms=res2.page_load_time_ms or res1.page_load_time_ms,
+            file_path=str(Path(flow_path).as_posix()),
         )
 
-    # Failed on retry
     return FlowResult(
         name=res2.name,
         status="failed",
@@ -192,39 +198,115 @@ def run_flow(flow_path: str, engine: str = "chromium") -> FlowResult:
         console_errors=res1.console_errors + res2.console_errors,
         network_failures=res1.network_failures + res2.network_failures,
         page_load_time_ms=res2.page_load_time_ms or res1.page_load_time_ms,
+        file_path=str(Path(flow_path).as_posix()),
     )
+
+
+def run_suite(engine: str = "chromium"):
+    start_dt = datetime.datetime.now(datetime.timezone.utc)
+    started_at = start_dt.isoformat()
+    start_time = time.time()
+
+    # 1. Check session validity first
+    valid = is_session_valid()
+    if not valid:
+        end_dt = datetime.datetime.now(datetime.timezone.utc)
+        duration_ms = int((time.time() - start_time) * 1000)
+        run_record = save_run(
+            {
+                "engine": engine,
+                "status": "session_expired",
+                "started_at": started_at,
+                "finished_at": end_dt.isoformat(),
+                "duration_ms": duration_ms,
+                "session_valid": False,
+                "flow_results": [],
+            }
+        )
+        print("Session expired or invalid! Stopped suite execution.")
+        return run_record
+
+    # 2. Run all flow files not starting with underscore
+    flow_files = sorted(
+        [
+            p
+            for p in FLOWS_DIR.glob("*.py")
+            if not p.name.startswith("_") and p.is_file()
+        ]
+    )
+
+    flow_results_data = []
+    for flow_p in flow_files:
+        print(f"Running flow: {flow_p.name}...")
+        res = run_flow(str(flow_p), engine)
+        flow_results_data.append(
+            {
+                "name": res.name,
+                "file_path": str(flow_p.as_posix()),
+                "status": res.status,
+                "attempts": res.attempts,
+                "duration_ms": res.duration_ms,
+                "trace_path": res.trace_path,
+                "steps": res.steps,
+                "console_errors": res.console_errors,
+                "network_failures": res.network_failures,
+            }
+        )
+
+    end_dt = datetime.datetime.now(datetime.timezone.utc)
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    run_record = save_run(
+        {
+            "engine": engine,
+            "status": "completed",
+            "started_at": started_at,
+            "finished_at": end_dt.isoformat(),
+            "duration_ms": duration_ms,
+            "session_valid": True,
+            "flow_results": flow_results_data,
+        }
+    )
+    print(f"Suite completed. Run ID: {run_record.id} saved to DB.")
+    return run_record
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m app.runner <flow_path> [engine]")
+        print("Usage:")
+        print("  python -m app.runner <flow_path> [engine]")
+        print("  python -m app.runner suite [engine]")
         sys.exit(1)
 
-    flow_path = sys.argv[1]
+    first_arg = sys.argv[1]
     engine = sys.argv[2] if len(sys.argv) > 2 else "chromium"
 
-    result = run_flow(flow_path, engine)
-    print(f"\nFlow: {result.name} | Status: {result.status.upper()} | Attempts: {result.attempts} | Duration: {result.duration_ms}ms")
-    if result.page_load_time_ms is not None:
-        print(f"Page Load Time: {result.page_load_time_ms}ms")
-    for idx, s in enumerate(result.steps, start=1):
-        line = f"  [{s.status.upper()}] Step {idx}: {s.description} ({s.duration_ms}ms)"
-        if s.error_message:
-            line += f" -> Error: {s.error_message}"
-        if s.screenshot_path:
-            line += f" -> Screenshot: {s.screenshot_path}"
-        print(line)
+    if first_arg == "suite":
+        run_suite(engine)
+    else:
+        flow_path = first_arg
+        result = run_flow(flow_path, engine)
+        print(f"\nFlow: {result.name} | Status: {result.status.upper()} | Attempts: {result.attempts} | Duration: {result.duration_ms}ms")
+        if result.page_load_time_ms is not None:
+            print(f"Page Load Time: {result.page_load_time_ms}ms")
+        for idx, s in enumerate(result.steps, start=1):
+            line = f"  [{s.status.upper()}] Step {idx}: {s.description} ({s.duration_ms}ms)"
+            if s.error_message:
+                line += f" -> Error: {s.error_message}"
+            if s.screenshot_path:
+                line += f" -> Screenshot: {s.screenshot_path}"
+            print(line)
 
-    print(f"Console Errors: {len(result.console_errors)}")
-    for err in result.console_errors:
-        print(f"  - [Console Error] {err['message']} (url: {err['page_url']})")
+        print(f"Console Errors: {len(result.console_errors)}")
+        for err in result.console_errors:
+            print(f"  - [Console Error] {err['message']} (url: {err['page_url']})")
 
-    print(f"Network Failures (>=400): {len(result.network_failures)}")
-    for fail in result.network_failures:
-        print(f"  - [HTTP {fail['status_code']}] {fail['method']} {fail['url']}")
+        print(f"Network Failures (>=400): {len(result.network_failures)}")
+        for fail in result.network_failures:
+            print(f"  - [HTTP {fail['status_code']}] {fail['method']} {fail['url']}")
 
-    if result.trace_path:
-        print(f"Trace saved: {result.trace_path}")
+        if result.trace_path:
+            print(f"Trace saved: {result.trace_path}")
 
 
 if __name__ == "__main__":
