@@ -7,6 +7,7 @@ from typing import Callable, List, Optional
 from playwright.sync_api import sync_playwright
 
 from app.config import load_config
+from app.monitors import MonitorCollector, attach, record_load_time
 
 AUTH_STATE_PATH = Path("auth/state.json")
 ARTIFACTS_DIR = Path("artifacts")
@@ -29,6 +30,9 @@ class FlowResult:
     duration_ms: int
     steps: List[StepResult] = field(default_factory=list)
     trace_path: Optional[str] = None
+    console_errors: List[dict] = field(default_factory=list)
+    network_failures: List[dict] = field(default_factory=list)
+    page_load_time_ms: Optional[int] = None
 
 
 def load_flow_module(flow_path: str):
@@ -55,6 +59,7 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
     steps: List[StepResult] = []
     has_failed = False
     start_time = time.time()
+    collector = MonitorCollector()
 
     with sync_playwright() as p:
         browser_type = getattr(p, engine.lower(), None)
@@ -69,6 +74,9 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
         context = browser.new_context(**context_kwargs)
         context.tracing.start(screenshots=True, snapshots=True, sources=True)
         page = context.new_page()
+
+        # Attach monitors
+        attach(page, collector)
 
         def step(description: str, fn: Callable[[], None]) -> None:
             nonlocal has_failed
@@ -102,6 +110,7 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
 
         try:
             module.run(page, step, config.base_url)
+            record_load_time(page, collector)
         except Exception as e:
             if not has_failed:
                 has_failed = True
@@ -131,6 +140,21 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
         duration_ms=total_duration,
         steps=steps,
         trace_path=trace_saved,
+        console_errors=[
+            {"message": err.message, "page_url": err.page_url, "timestamp": err.timestamp}
+            for err in collector.console_errors
+        ],
+        network_failures=[
+            {
+                "url": fail.url,
+                "method": fail.method,
+                "status_code": fail.status_code,
+                "page_url": fail.page_url,
+                "timestamp": fail.timestamp,
+            }
+            for fail in collector.network_failures
+        ],
+        page_load_time_ms=collector.page_load_time_ms,
     )
 
 
@@ -151,10 +175,13 @@ def run_flow(flow_path: str, engine: str = "chromium") -> FlowResult:
             attempts=2,
             duration_ms=res1.duration_ms + res2.duration_ms,
             steps=res2.steps,
-            trace_path=res1.trace_path,  # preserve failure trace from attempt 1
+            trace_path=res1.trace_path,
+            console_errors=res1.console_errors + res2.console_errors,
+            network_failures=res1.network_failures + res2.network_failures,
+            page_load_time_ms=res2.page_load_time_ms or res1.page_load_time_ms,
         )
 
-    # If retry also fails, mark failed
+    # Failed on retry
     return FlowResult(
         name=res2.name,
         status="failed",
@@ -162,6 +189,9 @@ def run_flow(flow_path: str, engine: str = "chromium") -> FlowResult:
         duration_ms=res1.duration_ms + res2.duration_ms,
         steps=res2.steps,
         trace_path=res2.trace_path or res1.trace_path,
+        console_errors=res1.console_errors + res2.console_errors,
+        network_failures=res1.network_failures + res2.network_failures,
+        page_load_time_ms=res2.page_load_time_ms or res1.page_load_time_ms,
     )
 
 
@@ -175,6 +205,8 @@ def main():
 
     result = run_flow(flow_path, engine)
     print(f"\nFlow: {result.name} | Status: {result.status.upper()} | Attempts: {result.attempts} | Duration: {result.duration_ms}ms")
+    if result.page_load_time_ms is not None:
+        print(f"Page Load Time: {result.page_load_time_ms}ms")
     for idx, s in enumerate(result.steps, start=1):
         line = f"  [{s.status.upper()}] Step {idx}: {s.description} ({s.duration_ms}ms)"
         if s.error_message:
@@ -182,6 +214,14 @@ def main():
         if s.screenshot_path:
             line += f" -> Screenshot: {s.screenshot_path}"
         print(line)
+
+    print(f"Console Errors: {len(result.console_errors)}")
+    for err in result.console_errors:
+        print(f"  - [Console Error] {err['message']} (url: {err['page_url']})")
+
+    print(f"Network Failures (>=400): {len(result.network_failures)}")
+    for fail in result.network_failures:
+        print(f"  - [HTTP {fail['status_code']}] {fail['method']} {fail['url']}")
 
     if result.trace_path:
         print(f"Trace saved: {result.trace_path}")
