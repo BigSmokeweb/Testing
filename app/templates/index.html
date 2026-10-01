@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}AutoQA - Home{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Session Status</h2>
+  {% if session_valid %}
+    <div class="alert-box alert-valid">
+      ✓ Session is VALID. Tests are ready to run against <code>{{ config.base_url }}</code>.
+    </div>
+  {% else %}
+    <div class="alert-box alert-expired">
+      ⚠ Session expired or missing. Run: <code>python -m app.session connect</code> in terminal to authenticate.
+    </div>
+  {% endif %}
+
+  <form method="POST" action="/run">
+    <label for="engine"><strong>Select Engine:</strong></label>
+    <div class="form-group">
+      <select name="engine" id="engine">
+        {% for eng in config.engines %}
+          <option value="{{ eng }}">{{ eng }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" {% if not session_valid %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+        Run Suite
+      </button>
+    </div>
+  </form>
+</div>
+
+{% if latest_run %}
+<div class="card">
+  <h2>Latest Run Summary</h2>
+  <p><strong>Run ID:</strong> #{{ latest_run.id }}</p>
+  <p><strong>Status:</strong> <span class="badge badge-{{ latest_run.status }}">{{ latest_run.status }}</span></p>
+  <p><strong>Engine:</strong> {{ latest_run.engine }}</p>
+  <p><strong>Duration:</strong> {{ latest_run.duration_ms }} ms</p>
+  <p><strong>Started:</strong> {{ latest_run.started_at }}</p>
+  <p style="margin-top: 10px;">
+    <a href="/report/{{ latest_run.id }}" style="color: var(--primary); font-weight: 600;">View Full Report &rarr;</a>
+  </p>
+</div>
+{% endif %}
+{% endblock %}

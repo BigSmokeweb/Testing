@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}AutoQA - Run #{{ run.id }} Report{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Run #{{ run.id }} Details</h2>
+  <p><strong>Status:</strong> <span class="badge badge-{{ run.status }}">{{ run.status }}</span></p>
+  <p><strong>Engine:</strong> {{ run.engine }}</p>
+  <p><strong>Duration:</strong> {{ run.duration_ms }} ms</p>
+  <p><strong>Started:</strong> {{ run.started_at }}</p>
+  <p><strong>Finished:</strong> {{ run.finished_at }}</p>
+</div>
+
+<div class="card">
+  <h2>Flow Results</h2>
+  {% if flows %}
+    {% for f in flows %}
+    <div style="border-bottom: 1px solid var(--card-border); padding: 16px 0;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3>{{ f.flow.name }} <span class="badge badge-{{ f.result.status }}">{{ f.result.status }}</span></h3>
+        <div>
+          <span style="color: var(--text-muted); font-size: 13px;">Attempts: {{ f.result.attempts }} | Duration: {{ f.result.duration_ms }}ms</span>
+          {% if f.result.trace_path %}
+            <a href="/artifacts/{{ f.result.trace_path | basename }}" download style="margin-left: 12px; color: var(--primary);">Download Trace (.zip)</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <h4>Steps</h4>
+        {% for s in f.steps %}
+        <div class="step-card {{ s.status }}">
+          <div style="display: flex; justify-content: space-between;">
+            <strong>Step {{ s.step_index }}: {{ s.description }}</strong>
+            <span class="badge badge-{{ s.status }}">{{ s.status }} ({{ s.duration_ms }}ms)</span>
+          </div>
+          {% if s.error_message %}
+            <div class="error-text">{{ s.error_message }}</div>
+          {% endif %}
+          {% if s.screenshot_path %}
+            <div style="margin-top: 10px;">
+              <strong>Screenshot on failure:</strong>
+              <img src="/artifacts/{{ s.screenshot_path | basename }}" alt="Step failure screenshot" class="screenshot-preview">
+            </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+
+      {% if f.console_logs %}
+      <div style="margin-top: 12px;">
+        <h4>Console Errors</h4>
+        {% for cl in f.console_logs %}
+        <div class="log-entry" style="color: #fca5a5;">
+          [{{ cl.timestamp }}] {{ cl.message }} (URL: {{ cl.page_url }})
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if f.network_failures %}
+      <div style="margin-top: 12px;">
+        <h4>Network Failures (>=400)</h4>
+        {% for nf in f.network_failures %}
+        <div class="log-entry" style="color: #fca5a5;">
+          [{{ nf.timestamp }}] HTTP {{ nf.status_code }} {{ nf.method }} {{ nf.url }}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p style="color: var(--text-muted);">No flows executed in this run (e.g. session was expired).</p>
+  {% endif %}
+</div>
+{% endblock %}

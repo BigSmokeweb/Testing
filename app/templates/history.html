@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}AutoQA - Run History{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Run History</h2>
+  {% if runs %}
+  <table>
+    <thead>
+      <tr>
+        <th>Run ID</th>
+        <th>Date / Time</th>
+        <th>Engine</th>
+        <th>Status</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Flaky</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td>#{{ r.id }}</td>
+        <td>{{ r.started_at[:19].replace('T', ' ') }}</td>
+        <td>{{ r.engine }}</td>
+        <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+        <td>{{ r.passed_count }}</td>
+        <td>{{ r.failed_count }}</td>
+        <td>{{ r.flaky_count }}</td>
+        <td><a href="/report/{{ r.id }}">View Report</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: var(--text-muted); margin-top: 10px;">No runs recorded yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
