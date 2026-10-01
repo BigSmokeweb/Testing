@@ -58,9 +58,9 @@ def home(request: Request):
         latest_run = session.exec(select(Run).order_by(Run.id.desc())).first()
 
     return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
+        request=request,
+        name="index.html",
+        context={
             "config": config,
             "session_valid": session_valid,
             "latest_run": latest_run,
@@ -111,9 +111,9 @@ def history(request: Request):
             )
 
     return templates.TemplateResponse(
-        "history.html",
-        {
-            "request": request,
+        request=request,
+        name="history.html",
+        context={
             "runs": run_data,
         },
     )
@@ -156,9 +156,9 @@ def report(request: Request, run_id: int):
             )
 
     return templates.TemplateResponse(
-        "report.html",
-        {
-            "request": request,
+        request=request,
+        name="report.html",
+        context={
             "run": run,
             "flows": flows_detail,
         },
