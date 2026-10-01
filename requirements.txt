@@ -1,0 +1,7 @@
+playwright
+fastapi
+uvicorn
+jinja2
+sqlmodel
+pyyaml
+requests
