@@ -39,11 +39,13 @@ class TestSitesVerification(unittest.TestCase):
         csrf = match.group(1)
 
         domain = f"test-{uuid.uuid4().hex[:6]}.com"
-        res = c1.post(
-            "/sites",
-            data={"url": f"https://{domain}", "csrf_token": csrf},
-            follow_redirects=True,
-        )
+        import ipaddress
+        with patch("app.safety.resolve_hostname_ips", return_value=[ipaddress.ip_address("93.184.216.34")]):
+            res = c1.post(
+                "/sites",
+                data={"url": f"https://{domain}", "csrf_token": csrf},
+                follow_redirects=True,
+            )
         self.assertEqual(res.status_code, 200)
         self.assertIn(domain, res.text)
 
@@ -59,7 +61,9 @@ class TestSitesVerification(unittest.TestCase):
         csrf = re.search(r'name="csrf_token"\s+value="([^"]+)"', res.text).group(1)
 
         domain = f"verify-{uuid.uuid4().hex[:6]}.com"
-        c1.post("/sites", data={"url": f"https://{domain}", "csrf_token": csrf}, follow_redirects=True)
+        import ipaddress
+        with patch("app.safety.resolve_hostname_ips", return_value=[ipaddress.ip_address("93.184.216.34")]):
+            c1.post("/sites", data={"url": f"https://{domain}", "csrf_token": csrf}, follow_redirects=True)
 
         with Session(engine) as session:
             site = session.exec(select(Site).where(Site.domain == domain)).first()

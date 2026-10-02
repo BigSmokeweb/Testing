@@ -6,6 +6,7 @@ import dns.resolver
 import requests
 from sqlmodel import Session, select
 from app.models import Site, engine
+from app.safety import validate_url
 
 MAX_SITES_PER_USER = 2
 
@@ -82,6 +83,10 @@ def add_site_for_user(user_id: int, raw_url: str) -> Tuple[Optional[Site], Optio
     norm_url, domain, err = normalize_site_url(raw_url)
     if err:
         return None, err
+
+    safe, reason = validate_url(norm_url)
+    if not safe:
+        return None, f"Invalid or unsafe URL: {reason}"
 
     with Session(engine) as session:
         count = session.exec(select(Site).where(Site.user_id == user_id)).all()
