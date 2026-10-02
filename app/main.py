@@ -144,7 +144,6 @@ def report(request: Request, run_id: int):
             network_fails = session.exec(
                 select(NetworkFailure).where(NetworkFailure.flow_result_id == fr.id)
             ).all()
-
             flows_detail.append(
                 {
                     "result": fr,
@@ -155,11 +154,36 @@ def report(request: Request, run_id: int):
                 }
             )
 
+        # Previous run for the same engine
+        previous_run = session.exec(
+            select(Run)
+            .where(Run.engine == run.engine, Run.id < run.id)
+            .order_by(Run.id.desc())
+        ).first()
+
+        prev_failed_flow_ids = set()
+        if previous_run:
+            prev_failed_results = session.exec(
+                select(FlowResultModel).where(
+                    FlowResultModel.run_id == previous_run.id,
+                    FlowResultModel.status == "failed",
+                )
+            ).all()
+            prev_failed_flow_ids = {fr.flow_id for fr in prev_failed_results}
+
+        new_failures = []
+        for fd in flows_detail:
+            if fd["result"].status == "failed":
+                if previous_run is None or fd["flow"].id not in prev_failed_flow_ids:
+                    new_failures.append(fd)
+
     return templates.TemplateResponse(
         request=request,
         name="report.html",
         context={
             "run": run,
             "flows": flows_detail,
+            "previous_run": previous_run,
+            "new_failures": new_failures,
         },
     )

@@ -11,6 +11,24 @@
   <p><strong>Finished:</strong> {{ run.finished_at }}</p>
 </div>
 
+{% if previous_run %}
+<div class="card">
+  <h2>New Failures Since Last Run (vs #{{ previous_run.id }})</h2>
+  {% if new_failures %}
+    <p style="color: #fca5a5; margin-bottom: 12px;"><strong>{{ new_failures | length }}</strong> flow(s) failed in this run that passed or did not exist in run #{{ previous_run.id }}:</p>
+    <ul>
+      {% for nf in new_failures %}
+        <li style="margin-left: 20px; color: var(--status-fail);">
+          <strong>{{ nf.flow.name }}</strong> (Duration: {{ nf.result.duration_ms }}ms)
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p style="color: var(--status-pass);">✓ No new failures compared to run #{{ previous_run.id }} on {{ run.engine }}.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Flow Results</h2>
   {% if flows %}
