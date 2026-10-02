@@ -8,6 +8,7 @@ from typing import Callable, List, Optional
 from playwright.sync_api import sync_playwright
 
 from app.config import load_config
+from app.guards import setup_domain_guard, RefusedActionError
 from app.monitors import MonitorCollector, attach, record_load_time
 from app.session import is_valid as is_session_valid
 from app.models import save_run, init_db
@@ -83,6 +84,9 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
         # Attach monitors
         attach(page, collector)
 
+        # Attach domain guard: abort requests outside allowed_domains
+        setup_domain_guard(page, config.allowed_domains)
+
         def step(description: str, fn: Callable[[], None]) -> None:
             nonlocal has_failed
             if has_failed:
@@ -94,6 +98,17 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
                 fn()
                 duration = int((time.time() - step_start) * 1000)
                 steps.append(StepResult(description=description, status="passed", duration_ms=duration))
+            except RefusedActionError as e:
+                # safe_click refused: record as skipped, do NOT fail the flow
+                duration = int((time.time() - step_start) * 1000)
+                steps.append(
+                    StepResult(
+                        description=description,
+                        status="skipped",
+                        duration_ms=duration,
+                        error_message=f"[Guard] {e}",
+                    )
+                )
             except Exception as e:
                 has_failed = True
                 duration = int((time.time() - step_start) * 1000)
