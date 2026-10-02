@@ -293,6 +293,9 @@ def run_suite(engine: str = "chromium"):
 
 
 def main():
+    # Ensure UTF-8 output on Windows terminals (avoids cp1252 UnicodeEncodeError)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) < 2:
         print("Usage:")
         print("  python -m app.runner <flow_path> [engine]")
