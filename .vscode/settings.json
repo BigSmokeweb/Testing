@@ -1,0 +1,10 @@
+{
+  "files.associations": {
+    "**/templates/**/*.html": "jinja-html"
+  },
+  "html.validate.scripts": false,
+  "html.validate.styles": false,
+  "[jinja-html]": {
+    "editor.formatOnSave": false
+  }
+}

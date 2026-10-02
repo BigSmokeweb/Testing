@@ -114,12 +114,13 @@
     </thead>
     <tbody>
       {% for lc in link_checks %}
-      <tr style="{% if not lc.ok %}background: rgba(239,68,68,0.07);{% endif %}">
+      {% set row_bg = "background: rgba(239,68,68,0.07);" if not lc.ok else "" %}
+      {% set lc_badge = "badge-passed" if lc.ok else "badge-failed" %}
+      {% set lc_code = lc.status_code if lc.status_code else "ERR" %}
+      <tr style="{{ row_bg }}">
         <td style="font-family: monospace; font-size: 13px; word-break: break-all;">{{ lc.target_url }}</td>
         <td>
-          <span class="badge {% if lc.ok %}badge-passed{% else %}badge-failed{% endif %}">
-            {{ lc.status_code if lc.status_code else "ERR" }}
-          </span>
+          <span class="badge {{ lc_badge }}">{{ lc_code }}</span>
         </td>
         <td>{% if lc.ok %}✓{% else %}✗{% endif %}</td>
       </tr>
