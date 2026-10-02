@@ -13,6 +13,7 @@
       <nav>
         <a href="/">Home</a>
         {% if user %}
+        <a href="/sites">My Sites</a>
         <a href="/history">History</a>
         <span style="color: #64748b; font-size: 14px; margin-left: 12px;">{{ user.email }}</span>
         <a href="/logout" style="margin-left: 8px;">Logout</a>

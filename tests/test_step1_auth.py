@@ -1,4 +1,5 @@
 import unittest
+import uuid
 import re
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -26,8 +27,8 @@ class TestAuthFlow(unittest.TestCase):
         self.assertIsNotNone(match)
         csrf = match.group(1)
 
-        # 3. Register user
-        email = "testuser@example.com"
+        # 3. Register user with unique email
+        email = f"user_{uuid.uuid4().hex[:8]}@example.com"
         reg_res = client.post("/register", data={"email": email, "password": "password123", "csrf_token": csrf}, follow_redirects=False)
         self.assertEqual(reg_res.status_code, 303)
         cookie = reg_res.cookies.get(SESSION_COOKIE_NAME)

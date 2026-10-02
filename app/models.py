@@ -17,6 +17,17 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class Site(SQLModel, table=True):
+    __tablename__ = "sites"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    url: str
+    domain: str
+    verify_token: str = Field(index=True)
+    verified_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Suite(SQLModel, table=True):
     __tablename__ = "suites"
     id: Optional[int] = Field(default=None, primary_key=True)

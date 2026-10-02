@@ -19,12 +19,18 @@ from app.models import (
     FlowResultModel,
     NetworkFailure,
     Run,
+    Site,
     StepResultModel,
     User,
     engine as db_engine,
     init_db,
     get_link_checks,
     save_link_checks,
+)
+from app.sites import (
+    add_site_for_user,
+    get_user_sites,
+    verify_site_ownership,
 )
 from app.runner import run_suite
 from app.linkcheck import check_links
@@ -440,3 +446,86 @@ def report(request: Request, run_id: int):
             "user": user,
         },
     )
+
+
+@app.get("/sites", response_class=HTMLResponse)
+def sites_list(request: Request, error: str = None, success: str = None):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    sites = get_user_sites(user.id)
+    csrf_token = get_or_create_csrf(request)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="sites.html",
+        context={
+            "user": user,
+            "sites": sites,
+            "csrf_token": csrf_token,
+            "error": error,
+            "success": success,
+        },
+    )
+
+
+@app.post("/sites")
+async def add_site(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    body = await request.body()
+    parsed = parse_qs(body.decode("utf-8"))
+    csrf = parsed.get("csrf_token", [""])[0]
+    raw_url = parsed.get("url", [""])[0].strip()
+
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    if not verify_csrf_token(csrf, session_tok):
+        return RedirectResponse(url="/sites?error=Invalid+CSRF+token", status_code=303)
+
+    site, err = add_site_for_user(user.id, raw_url)
+    if err:
+        from urllib.parse import quote_plus
+        return RedirectResponse(url=f"/sites?error={quote_plus(err)}", status_code=303)
+
+    return RedirectResponse(url="/sites?success=Site+added+successfully", status_code=303)
+
+
+@app.post("/sites/{site_id}/verify")
+async def verify_site(request: Request, site_id: int):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    body = await request.body()
+    parsed = parse_qs(body.decode("utf-8"))
+    csrf = parsed.get("csrf_token", [""])[0]
+
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    if not verify_csrf_token(csrf, session_tok):
+        return RedirectResponse(url="/sites?error=Invalid+CSRF+token", status_code=303)
+
+    from datetime import datetime, timezone
+    with Session(db_engine) as session:
+        site = session.get(Site, site_id)
+        if not site or site.user_id != user.id:
+            return RedirectResponse(url="/sites?error=Site+not+found", status_code=303)
+
+        if site.verified_at:
+            return RedirectResponse(url="/sites?success=Site+is+already+verified", status_code=303)
+
+        verified = verify_site_ownership(site)
+        if not verified:
+            return RedirectResponse(
+                url="/sites?error=Verification+failed.+Ensure+DNS+record+or+verification+file+is+live.",
+                status_code=303,
+            )
+
+        site.verified_at = datetime.now(timezone.utc)
+        session.add(site)
+        session.commit()
+
+    return RedirectResponse(url="/sites?success=Site+verified+successfully!", status_code=303)
+
