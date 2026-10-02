@@ -1,10 +1,20 @@
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from typing import List, Optional
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-DB_FILE = "autoqa.db"
-sqlite_url = f"sqlite:///{DB_FILE}"
-engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///autoqa.db")
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True)
+    password_hash: str
+    email_verified: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Suite(SQLModel, table=True):
@@ -27,12 +37,16 @@ class Run(SQLModel, table=True):
     __tablename__ = "runs"
     id: Optional[int] = Field(default=None, primary_key=True)
     suite_id: Optional[int] = Field(default=None, foreign_key="suites.id")
-    engine: str
-    status: str  # completed | session_expired
+    engine: str = "chromium"
+    status: str  # completed | session_expired | queued | running | failed | blocked | expired
     started_at: str
     finished_at: str
-    duration_ms: int
-    session_valid: bool
+    duration_ms: int = 0
+    session_valid: bool = True
+    user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    site_id: Optional[int] = Field(default=None)
+    mode: Optional[str] = Field(default=None)  # public | credentials
+    queued_at: Optional[str] = Field(default=None)
 
 
 class FlowResultModel(SQLModel, table=True):

@@ -15,6 +15,7 @@
   {% endif %}
 
   <form method="POST" action="/run">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="engine"><strong>Select Engine:</strong></label>
     <div class="form-group">
       <select name="engine" id="engine">

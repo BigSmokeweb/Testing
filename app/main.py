@@ -1,9 +1,15 @@
+import os
 from pathlib import Path
 import threading
+from urllib.parse import parse_qs
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sqlmodel import Session, select
 
 from app.config import load_config
@@ -14,6 +20,7 @@ from app.models import (
     NetworkFailure,
     Run,
     StepResultModel,
+    User,
     engine as db_engine,
     init_db,
     get_link_checks,
@@ -22,8 +29,21 @@ from app.models import (
 from app.runner import run_suite
 from app.linkcheck import check_links
 from app.session import is_valid as is_session_valid
+from app.auth import (
+    SESSION_COOKIE_NAME,
+    get_current_user_from_token,
+    create_session_token,
+    generate_csrf_token,
+    verify_csrf_token,
+    hash_password,
+    verify_password,
+    normalize_and_validate_email,
+)
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="AutoQA Dashboard")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Mount static files and artifacts
 STATIC_DIR = Path("app/static")
@@ -51,10 +71,212 @@ def on_startup():
     init_db()
 
 
+def get_current_user(request: Request):
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    return get_current_user_from_token(token)
+
+
+def get_or_create_csrf(request: Request) -> str:
+    token = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    return generate_csrf_token(token)
+
+
+def is_authenticated(request: Request) -> bool:
+    if os.getenv("LOCAL_MODE", "0") == "1":
+        return True
+    return get_current_user(request) is not None
+
+
+@app.get("/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    if get_current_user(request):
+        return RedirectResponse(url="/", status_code=303)
+    csrf_token = get_or_create_csrf(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="register.html",
+        context={"csrf_token": csrf_token, "error": None, "user": None},
+    )
+
+
+@app.post("/register")
+@limiter.limit("10/minute")
+async def register_submit(request: Request):
+    body = await request.body()
+    parsed = parse_qs(body.decode("utf-8"))
+    email_raw = parsed.get("email", [""])[0].strip()
+    password = parsed.get("password", [""])[0]
+    csrf = parsed.get("csrf_token", [""])[0]
+
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    if not verify_csrf_token(csrf, session_tok):
+        return templates.TemplateResponse(
+            request=request,
+            name="register.html",
+            context={
+                "csrf_token": get_or_create_csrf(request),
+                "error": "Invalid CSRF token. Please reload.",
+                "user": None,
+            },
+            status_code=400,
+        )
+
+    try:
+        email = normalize_and_validate_email(email_raw)
+    except Exception:
+        return templates.TemplateResponse(
+            request=request,
+            name="register.html",
+            context={
+                "csrf_token": get_or_create_csrf(request),
+                "error": "Invalid email address.",
+                "email": email_raw,
+                "user": None,
+            },
+            status_code=400,
+        )
+
+    if len(password) < 8:
+        return templates.TemplateResponse(
+            request=request,
+            name="register.html",
+            context={
+                "csrf_token": get_or_create_csrf(request),
+                "error": "Password must be at least 8 characters.",
+                "email": email,
+                "user": None,
+            },
+            status_code=400,
+        )
+
+    with Session(db_engine) as session:
+        existing = session.exec(select(User).where(User.email == email)).first()
+        if existing:
+            return templates.TemplateResponse(
+                request=request,
+                name="register.html",
+                context={
+                    "csrf_token": get_or_create_csrf(request),
+                    "error": "Email already registered.",
+                    "email": email,
+                    "user": None,
+                },
+                status_code=400,
+            )
+
+        new_user = User(
+            email=email,
+            password_hash=hash_password(password),
+            email_verified=False,
+        )
+        session.add(new_user)
+        session.commit()
+        session.refresh(new_user)
+        user_id = new_user.id
+
+    token = create_session_token(user_id)
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+    return response
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    if get_current_user(request):
+        return RedirectResponse(url="/", status_code=303)
+    csrf_token = get_or_create_csrf(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"csrf_token": csrf_token, "error": None, "user": None},
+    )
+
+
+@app.post("/login")
+@limiter.limit("10/minute")
+async def login_submit(request: Request):
+    body = await request.body()
+    parsed = parse_qs(body.decode("utf-8"))
+    email_raw = parsed.get("email", [""])[0].strip()
+    password = parsed.get("password", [""])[0]
+    csrf = parsed.get("csrf_token", [""])[0]
+
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    if not verify_csrf_token(csrf, session_tok):
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={
+                "csrf_token": get_or_create_csrf(request),
+                "error": "Invalid CSRF token. Please reload.",
+                "user": None,
+            },
+            status_code=400,
+        )
+
+    generic_error = "Invalid email or password."
+    try:
+        email = normalize_and_validate_email(email_raw)
+    except Exception:
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={
+                "csrf_token": get_or_create_csrf(request),
+                "error": generic_error,
+                "email": email_raw,
+                "user": None,
+            },
+            status_code=400,
+        )
+
+    with Session(db_engine) as session:
+        user = session.exec(select(User).where(User.email == email)).first()
+        if not user or not verify_password(password, user.password_hash):
+            return templates.TemplateResponse(
+                request=request,
+                name="login.html",
+                context={
+                    "csrf_token": get_or_create_csrf(request),
+                    "error": generic_error,
+                    "email": email_raw,
+                    "user": None,
+                },
+                status_code=400,
+            )
+        user_id = user.id
+
+    token = create_session_token(user_id)
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+    return response
+
+
+@app.get("/logout")
+def logout(request: Request):
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    user = get_current_user(request)
     config = load_config()
     session_valid = is_session_valid()
+    csrf_token = get_or_create_csrf(request)
 
     with Session(db_engine) as session:
         latest_run = session.exec(select(Run).order_by(Run.id.desc())).first()
@@ -66,8 +288,11 @@ def home(request: Request):
             "config": config,
             "session_valid": session_valid,
             "latest_run": latest_run,
+            "user": user,
+            "csrf_token": csrf_token,
         },
     )
+
 
 def _run_suite_and_linkcheck(engine: str) -> None:
     """Run full test suite then perform link check on all configured pages."""
@@ -79,16 +304,20 @@ def _run_suite_and_linkcheck(engine: str) -> None:
 
 @app.post("/run")
 async def trigger_run(request: Request):
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
     body = await request.body()
-    # Parse urlencoded body: engine=chromium
+    parsed = parse_qs(body.decode("utf-8"))
+    csrf = parsed.get("csrf_token", [""])[0]
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+
+    if os.getenv("LOCAL_MODE", "0") != "1" and not verify_csrf_token(csrf, session_tok):
+        return HTMLResponse("Invalid CSRF token", status_code=400)
+
     engine = "chromium"
-    try:
-        from urllib.parse import parse_qs
-        parsed = parse_qs(body.decode("utf-8"))
-        if "engine" in parsed and parsed["engine"]:
-            engine = parsed["engine"][0]
-    except Exception:
-        pass
+    if "engine" in parsed and parsed["engine"]:
+        engine = parsed["engine"][0]
 
     thread = threading.Thread(target=_run_suite_and_linkcheck, args=(engine,), daemon=True)
     thread.start()
@@ -97,6 +326,10 @@ async def trigger_run(request: Request):
 
 @app.get("/history", response_class=HTMLResponse)
 def history(request: Request):
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = get_current_user(request)
     with Session(db_engine) as session:
         runs = session.exec(select(Run).order_by(Run.id.desc())).all()
         run_data = []
@@ -124,12 +357,17 @@ def history(request: Request):
         name="history.html",
         context={
             "runs": run_data,
+            "user": user,
         },
     )
 
 
 @app.get("/report/{run_id}", response_class=HTMLResponse)
 def report(request: Request, run_id: int):
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = get_current_user(request)
     with Session(db_engine) as session:
         run = session.get(Run, run_id)
         if not run:
@@ -199,5 +437,6 @@ def report(request: Request, run_id: int):
             "new_failures": new_failures,
             "link_checks": link_checks,
             "broken_links": broken_links,
+            "user": user,
         },
     )
