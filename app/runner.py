@@ -12,6 +12,7 @@ from app.guards import setup_domain_guard, RefusedActionError
 from app.monitors import MonitorCollector, attach, record_load_time
 from app.session import is_valid as is_session_valid
 from app.models import save_run, init_db
+from app.alerts import send_alert
 
 AUTH_STATE_PATH = Path("auth/state.json")
 ARTIFACTS_DIR = Path("artifacts")
@@ -283,6 +284,11 @@ def run_suite(engine: str = "chromium"):
         }
     )
     print(f"Suite completed. Run ID: {run_record.id} saved to DB.")
+
+    # Send Slack alert if any flows failed
+    failed_names = [r["name"] for r in flow_results_data if r["status"] == "failed"]
+    send_alert(run_id=run_record.id, engine=engine, failed_flows=failed_names)
+
     return run_record
 
 
