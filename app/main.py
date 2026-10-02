@@ -12,13 +12,17 @@ from app.models import (
     ConsoleLog,
     Flow,
     FlowResultModel,
+    LinkCheck,
     NetworkFailure,
     Run,
     StepResultModel,
     engine as db_engine,
     init_db,
+    get_link_checks,
+    save_link_checks,
 )
 from app.runner import run_suite
+from app.linkcheck import check_links
 from app.session import is_valid as is_session_valid
 
 app = FastAPI(title="AutoQA Dashboard")
@@ -67,6 +71,13 @@ def home(request: Request):
         },
     )
 
+def _run_suite_and_linkcheck(engine: str) -> None:
+    """Run full test suite then perform link check on all configured pages."""
+    run_record = run_suite(engine)
+    if run_record and run_record.id:
+        results = check_links(run_record.id)
+        save_link_checks(results)
+
 
 @app.post("/run")
 async def trigger_run(request: Request):
@@ -81,7 +92,7 @@ async def trigger_run(request: Request):
     except Exception:
         pass
 
-    thread = threading.Thread(target=run_suite, args=(engine,), daemon=True)
+    thread = threading.Thread(target=_run_suite_and_linkcheck, args=(engine,), daemon=True)
     thread.start()
     return RedirectResponse(url="/history", status_code=303)
 
@@ -177,6 +188,9 @@ def report(request: Request, run_id: int):
                 if previous_run is None or fd["flow"].id not in prev_failed_flow_ids:
                     new_failures.append(fd)
 
+    link_checks = get_link_checks(run_id)
+    broken_links = [lc for lc in link_checks if not lc.ok]
+
     return templates.TemplateResponse(
         request=request,
         name="report.html",
@@ -185,5 +199,7 @@ def report(request: Request, run_id: int):
             "flows": flows_detail,
             "previous_run": previous_run,
             "new_failures": new_failures,
+            "link_checks": link_checks,
+            "broken_links": broken_links,
         },
     )

@@ -21,3 +21,5 @@ alert:
   slack_webhook: ""
 engines:
   - chromium
+link_check_pages:
+  - "/"

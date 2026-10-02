@@ -92,4 +92,40 @@
     <p style="color: var(--text-muted);">No flows executed in this run (e.g. session was expired).</p>
   {% endif %}
 </div>
+
+{% if link_checks %}
+<div class="card">
+  <h2>Link Check Results</h2>
+  <p style="color: var(--text-muted); margin-bottom: 12px;">
+    Checked {{ link_checks | length }} internal link(s).
+    {% if broken_links %}
+      <strong style="color: var(--status-fail);">{{ broken_links | length }} broken.</strong>
+    {% else %}
+      <strong style="color: var(--status-pass);">All OK.</strong>
+    {% endif %}
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Target URL</th>
+        <th>Status</th>
+        <th>OK</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lc in link_checks %}
+      <tr style="{% if not lc.ok %}background: rgba(239,68,68,0.07);{% endif %}">
+        <td style="font-family: monospace; font-size: 13px; word-break: break-all;">{{ lc.target_url }}</td>
+        <td>
+          <span class="badge {% if lc.ok %}badge-passed{% else %}badge-failed{% endif %}">
+            {{ lc.status_code if lc.status_code else "ERR" }}
+          </span>
+        </td>
+        <td>{% if lc.ok %}✓{% else %}✗{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

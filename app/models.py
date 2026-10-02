@@ -190,3 +190,29 @@ def save_run(run_data: dict) -> Run:
         session.refresh(run)
         session.expunge(run)
         return run
+
+
+def save_link_checks(results: list) -> None:
+    """Persist a list of link check result dicts into the link_checks table."""
+    if not results:
+        return
+    with Session(engine) as session:
+        for r in results:
+            session.add(
+                LinkCheck(
+                    run_id=r["run_id"],
+                    source_url=r["source_url"],
+                    target_url=r["target_url"],
+                    status_code=r["status_code"],
+                    ok=r["ok"],
+                )
+            )
+        session.commit()
+
+
+def get_link_checks(run_id: int) -> list:
+    """Return all link check results for a given run."""
+    with Session(engine) as session:
+        return session.exec(
+            select(LinkCheck).where(LinkCheck.run_id == run_id)
+        ).all()

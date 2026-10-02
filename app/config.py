@@ -12,6 +12,7 @@ class Config:
         self.extra_headers: Dict[str, str] = data.get("extra_headers", {})
         self.alert: Dict[str, Any] = data.get("alert", {"type": "none", "slack_webhook": ""})
         self.engines: List[str] = data.get("engines", ["chromium"])
+        self.link_check_pages: List[str] = data.get("link_check_pages", [])
 
     def __repr__(self) -> str:
         return (
