@@ -752,6 +752,11 @@ async def account_delete_route(request: Request):
 async def wizard_start(request: Request):
     body = await request.body()
     parsed = parse_qs(body.decode("utf-8"))
+    csrf = parsed.get("csrf_token", [""])[0]
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    if os.getenv("LOCAL_MODE", "0") != "1" and not verify_csrf_token(csrf, session_tok):
+        return HTMLResponse("Invalid CSRF token", status_code=400)
+
     url = parsed.get("url", [""])[0].strip()
     from urllib.parse import quote_plus
     user = get_current_user(request)
