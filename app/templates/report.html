@@ -94,8 +94,8 @@
   </h2>
 
   {% for page in error_pages %}
-  <div class="page-row has-errors" id="page-err-{{ loop.index }}">
-    <div class="page-row-header" onclick="togglePageRow(this.parentElement)" aria-expanded="false" role="button" tabindex="0"
+  <div class="page-row has-errors open" id="page-err-{{ loop.index }}">
+    <div class="page-row-header" onclick="togglePageRow(this.parentElement)" aria-expanded="true" role="button" tabindex="0"
          onkeydown="if(event.key==='Enter'||event.key===' ')togglePageRow(this.parentElement)">
       <span class="badge badge-failed" style="flex-shrink:0;">HTTP {{ page.status_code or 'ERR' }}</span>
       <span class="page-url" title="{{ page.url }}">{{ page.url }}</span>
@@ -116,8 +116,13 @@
       {% endif %}
 
       {% if page.screenshot_path %}
-        <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);margin:var(--sp-4) 0 var(--sp-2);text-transform:uppercase;letter-spacing:.04em;">Screenshot</h4>
+        <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);margin:var(--sp-4) 0 var(--sp-2);text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:6px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Screenshot
+        </h4>
         <img src="/artifacts/{{ page.screenshot_path | basename }}" alt="Screenshot of {{ page.url }}" class="screenshot-preview" loading="lazy">
+      {% else %}
+        <p style="font-size:12px;color:var(--text-faint);margin-top:var(--sp-3);">No screenshot captured for this error.</p>
       {% endif %}
     </div>
   </div>

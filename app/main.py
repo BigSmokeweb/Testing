@@ -617,13 +617,20 @@ def report(request: Request, run_id: int):
     link_checks = get_link_checks(run_id)
     broken_links = [lc for lc in link_checks if not lc.ok]
 
-    # Public-checks pages (v2 mode)
+    # Public-checks pages (v2 mode) — use a fresh session (previous one is closed)
     from app.models import Page as PageModel
     pages_all = []
-    try:
-        pages_all = session.exec(select(PageModel).where(PageModel.run_id == run_id)).all()
-    except Exception:
-        pages_all = []
+    run_site = None
+    with Session(db_engine) as session2:
+        try:
+            pages_all = session2.exec(
+                select(PageModel).where(PageModel.run_id == run_id)
+            ).all()
+        except Exception:
+            pages_all = []
+
+        if run.site_id:
+            run_site = session2.get(Site, run.site_id)
 
     error_pages = [p for p in pages_all if (p.status_code and p.status_code >= 400) or p.error]
     ok_pages = [p for p in pages_all if p not in error_pages]
@@ -631,11 +638,6 @@ def report(request: Request, run_id: int):
     # avg load time
     load_times = [p.load_ms for p in pages_all if p.load_ms]
     avg_load_ms = (sum(load_times) / len(load_times)) if load_times else None
-
-    # Attach site
-    run_site = None
-    if run.site_id:
-        run_site = session.get(Site, run.site_id)
 
     return templates.TemplateResponse(
         request=request,

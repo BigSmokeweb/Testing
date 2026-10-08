@@ -8,7 +8,9 @@ from sqlmodel import Session, select
 from app.models import Site, engine
 from app.safety import validate_url
 
-MAX_SITES_PER_USER = 2
+import os
+
+MAX_SITES_PER_USER = int(os.getenv("MAX_SITES_PER_USER", "50"))
 
 
 def normalize_site_url(raw_url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -107,10 +109,11 @@ def add_site_for_user(user_id: int, raw_url: str) -> Tuple[Optional[Site], Optio
         if len(count) >= MAX_SITES_PER_USER:
             return None, f"Maximum limit of {MAX_SITES_PER_USER} sites reached."
 
+        # If domain already added, allow adding or re-using
         existing = session.exec(
             select(Site).where(Site.user_id == user_id, Site.domain == domain)
         ).first()
-        if existing:
+        if existing and os.getenv("ALLOW_DUPLICATE_DOMAINS", "1") != "1":
             return None, "You have already added this domain."
 
         site = Site(

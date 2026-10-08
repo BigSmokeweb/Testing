@@ -10,8 +10,8 @@ from app.safety import validate_url
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_NAME = "autoqa_runs"
 
-# Limits from PLAN2.md
-MAX_RUNS_PER_USER_PER_DAY = 5
+# Limits from PLAN2.md (set to 50 for local dev / testing; change to 5 for production deployment)
+MAX_RUNS_PER_USER_PER_DAY = int(os.getenv("MAX_RUNS_PER_USER_PER_DAY", "50"))
 MAX_CONCURRENT_RUNS_PER_USER = 1
 MAX_CONCURRENT_RUNS_GLOBAL = 3
 

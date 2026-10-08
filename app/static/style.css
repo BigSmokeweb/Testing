@@ -491,6 +491,9 @@ td code { font-family: var(--font-mono); font-size: 12px; background: rgba(255,2
   border-bottom: 1px solid rgba(255,255,255,0.04);
   color: #fca5a5;
   line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* ── Step cards (v1 report) ──────────────────────────────────────────── */
@@ -1110,8 +1113,9 @@ td code { font-family: var(--font-mono); font-size: 12px; background: rgba(255,2
 .page-row-header {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
   cursor: pointer;
   user-select: none;
   transition: background var(--t-fast);
@@ -1124,22 +1128,24 @@ td code { font-family: var(--font-mono); font-size: 12px; background: rgba(255,2
 
 .page-url {
   flex: 1;
+  min-width: 0;               /* allow flex shrink + text-overflow */
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: break-all;
 }
 
 .page-row-body {
-  padding: 0 var(--sp-5) var(--sp-4);
+  padding: 0 var(--sp-4) var(--sp-4);
   border-top: 1px solid var(--border);
   display: none;
 }
 
 .page-row.open .page-row-body { display: block; }
-.page-row-chevron { color: var(--text-faint); font-size: 12px; transition: transform var(--t-fast); }
+.page-row-chevron { color: var(--text-faint); font-size: 12px; flex-shrink:0; transition: transform var(--t-fast); }
 .page-row.open .page-row-chevron { transform: rotate(180deg); }
 
 /* Comparison badge */
@@ -1363,6 +1369,11 @@ td code { font-family: var(--font-mono); font-size: 12px; background: rgba(255,2
   .how-grid { grid-template-columns: 1fr; }
   .navbar-inner { padding: 0 var(--sp-4); }
   .nav-email { display: none; }
+  /* Report page */
+  .page-url { font-size: 11px; }
+  .copy-issue-btn { display: none; }   /* hide on tiny screens to save space */
+  .screenshot-preview { border-radius: var(--r-sm); }
+  .step-card { padding: var(--sp-2) var(--sp-3); }
 }
 
 /* ── Accessibility ───────────────────────────────────────────────────── */
