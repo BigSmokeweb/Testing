@@ -537,10 +537,16 @@ def report(request: Request, run_id: int):
                 }
             )
 
-        # Previous run for the same engine
+        # Previous run for the same user, site, and engine
+        conditions = [Run.engine == run.engine, Run.id < run.id]
+        if run.user_id is not None:
+            conditions.append(Run.user_id == run.user_id)
+        if run.site_id is not None:
+            conditions.append(Run.site_id == run.site_id)
+
         previous_run = session.exec(
             select(Run)
-            .where(Run.engine == run.engine, Run.id < run.id)
+            .where(*conditions)
             .order_by(Run.id.desc())
         ).first()
 
