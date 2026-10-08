@@ -14,6 +14,7 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     password_hash: str
     email_verified: bool = Field(default=False)
+    session_version: int = Field(default=1)  # incremented on logout to invalidate old tokens
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -59,6 +60,7 @@ class Run(SQLModel, table=True):
     mode: Optional[str] = Field(default=None)  # public | credentials
     queued_at: Optional[str] = Field(default=None)
     score: Optional[int] = Field(default=None)  # 0-100 percentage of pages OK
+    note: Optional[str] = Field(default=None)    # failure reason (worker crash, reaper, blocked, expired)
 
 
 class Usage(SQLModel, table=True):

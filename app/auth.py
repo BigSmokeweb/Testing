@@ -28,14 +28,19 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def create_session_token(user_id: int) -> str:
-    return serializer.dumps({"user_id": user_id})
+def create_session_token(user_id: int, session_version: int = 1) -> str:
+    return serializer.dumps({"user_id": user_id, "v": session_version})
 
 
-def verify_session_token(token: str) -> Optional[int]:
+def verify_session_token(token: str) -> Optional[tuple[int, int]]:
+    """Returns (user_id, session_version) or None if invalid/expired."""
     try:
         data = serializer.loads(token, max_age=SESSION_MAX_AGE)
-        return data.get("user_id")
+        user_id = data.get("user_id")
+        version = data.get("v", 1)  # old tokens without 'v' default to 1
+        if user_id is None:
+            return None
+        return (user_id, version)
     except (BadSignature, SignatureExpired):
         return None
 
@@ -55,11 +60,28 @@ def verify_csrf_token(token: str, session_id: str) -> bool:
 def get_current_user_from_token(token: Optional[str]) -> Optional[User]:
     if not token:
         return None
-    user_id = verify_session_token(token)
-    if not user_id:
+    result = verify_session_token(token)
+    if not result:
         return None
+    user_id, token_version = result
     with Session(engine) as session:
-        return session.get(User, user_id)
+        user = session.get(User, user_id)
+        if not user:
+            return None
+        # Reject tokens whose version is older than the user's current version
+        if token_version != user.session_version:
+            return None
+        return user
+
+
+def invalidate_session(user_id: int) -> None:
+    """Increment session_version to invalidate all existing tokens for this user."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user:
+            user.session_version = (user.session_version or 1) + 1
+            session.add(user)
+            session.commit()
 
 
 def delete_user_account(user_id: int) -> bool:

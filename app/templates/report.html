@@ -26,6 +26,15 @@
   </div>
 </div>
 
+{% if run.note %}
+<div class="alert {% if run.status == 'failed' or run.status == 'expired' %}alert-error{% else %}alert-info{% endif %}" style="margin-bottom:var(--sp-6);" role="alert" id="run-note-banner">
+  <span class="alert-icon" aria-hidden="true">ℹ</span>
+  <div>
+    <strong>Note:</strong> {{ run.note }}
+  </div>
+</div>
+{% endif %}
+
 <!-- ── Summary Stats ──────────────────────────────────────────────── -->
 <div class="report-summary" role="region" aria-label="Run summary">
   <div class="stat-card stat-score">

@@ -49,6 +49,9 @@ def run_job_entry(run_id: int):
         if run:
             if run.status not in ("expired", "blocked"):
                 run.status = status
+                if err and status == "failed":
+                    # Store failure reason (truncated, no secrets)
+                    run.note = str(err)[:500]
             run.finished_at = finished_str
             run.duration_ms = duration_ms
             session.add(run)
@@ -74,6 +77,7 @@ def reap_stuck_runs(timeout_minutes: int = 10) -> int:
         for r in stuck_runs:
             r.status = "failed"
             r.finished_at = now_iso
+            r.note = "Worker died or timed out (no response for >10 minutes)"
             session.add(r)
             reaped += 1
         if reaped:

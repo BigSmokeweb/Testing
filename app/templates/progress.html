@@ -25,7 +25,8 @@
   </h1>
 
   <p class="progress-sub" id="progress-sub-text">
-    {% if run.status == 'queued'    %}Your test is waiting in the queue. A worker will pick it up shortly.
+    {% if run.note %}<strong>{{ run.note }}</strong>
+    {% elif run.status == 'queued'    %}Your test is waiting in the queue. A worker will pick it up shortly.
     {% elif run.status == 'running' %}Crawling your site — this typically takes 1–3 minutes.
     {% elif run.status == 'completed' %}All checks finished. Redirecting to your report…
     {% elif run.status == 'failed'  %}An error occurred during the test run. You can try again from My Sites.
