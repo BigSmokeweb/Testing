@@ -124,6 +124,12 @@ netfilter-persistent save
 > worker to reach Redis and Postgres. The worker_external network has
 > outbound internet access for crawling, but iptables rules above block
 > it from reaching private IP ranges.
+>
+> **SSRF & DNS Rebinding Protection:** The application applies Playwright
+> request guards on outgoing URLs. To mitigate DNS rebinding where a domain
+> resolves to a public IP during validation but a loopback/private IP during
+> request dispatch, the host-level iptables rules above (or `scripts/block_worker_internal.sh`)
+> are required to drop any packets from the worker to private subnets at the kernel network layer.
 
 ### 6. Postgres backups
 ```bash
