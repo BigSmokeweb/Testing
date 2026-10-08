@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -23,6 +23,7 @@ from app.models import (
     Site,
     StepResultModel,
     User,
+    Page,
     engine as db_engine,
     init_db,
     get_link_checks,
@@ -92,15 +93,68 @@ def log_security_event(event_type: str, client_ip: str, details: str):
     security_logger.info(f"EVENT={event_type} IP={client_ip} DETAILS={details}")
 
 
-# Mount static files and artifacts
+# Mount static files
 STATIC_DIR = Path("app/static")
-ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR = Path("artifacts").resolve()
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.mount("/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
+
+
+@app.get("/artifacts/{file_path:path}")
+def get_artifact(request: Request, file_path: str):
+    user = get_current_user(request)
+    if not user and os.getenv("LOCAL_MODE", "0") != "1":
+        return HTMLResponse("Unauthorized", status_code=401)
+
+    # Prevent path traversal
+    try:
+        resolved_path = (ARTIFACTS_DIR / file_path).resolve()
+        if not str(resolved_path).startswith(str(ARTIFACTS_DIR)) or not resolved_path.is_file():
+            return HTMLResponse("Artifact not found", status_code=404)
+    except Exception:
+        return HTMLResponse("Artifact not found", status_code=404)
+
+    # Determine ownership:
+    # 1. Check if first component is run_id (v2 mode layout: artifacts/<run_id>/...)
+    run_id_val = None
+    parts = Path(file_path).parts
+    if parts and parts[0].isdigit():
+        run_id_val = int(parts[0])
+
+    # 2. If flat filename (v1 or basename), query Page or FlowResultModel / StepResultModel
+    filename = resolved_path.name
+    with Session(db_engine) as session:
+        if run_id_val is None:
+            # Check Page
+            pg = session.exec(select(Page).where(Page.screenshot_path.like(f"%{filename}"))).first()
+            if pg:
+                run_id_val = pg.run_id
+            else:
+                # Check FlowResult trace_path
+                fr = session.exec(select(FlowResultModel).where(FlowResultModel.trace_path.like(f"%{filename}"))).first()
+                if fr:
+                    run_id_val = fr.run_id
+                else:
+                    # Check StepResultModel screenshot_path
+                    sr = session.exec(select(StepResultModel).where(StepResultModel.screenshot_path.like(f"%{filename}"))).first()
+                    if sr:
+                        fr_parent = session.get(FlowResultModel, sr.flow_result_id)
+                        if fr_parent:
+                            run_id_val = fr_parent.run_id
+
+        if run_id_val is not None:
+            run = session.get(Run, run_id_val)
+            if not run or not verify_run_ownership(run, user):
+                return HTMLResponse("Artifact not found", status_code=404)
+        else:
+            # Artifact exists on disk but not linked to any recognized run in DB
+            if os.getenv("LOCAL_MODE", "0") != "1":
+                return HTMLResponse("Artifact not found", status_code=404)
+
+    return FileResponse(resolved_path)
 
 templates = Jinja2Templates(directory="app/templates")
 
