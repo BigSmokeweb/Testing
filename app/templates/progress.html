@@ -137,7 +137,15 @@
       })
       .catch(function () {
         pollFailures++;
-        if (pollFailures >= 5) clearInterval(interval);
+        if (pollFailures >= 5) {
+          clearInterval(interval);
+          var st = document.getElementById('progress-status-text');
+          var sb = document.getElementById('progress-sub-text');
+          if (st) st.textContent = 'Connection lost';
+          if (sb) {
+            sb.innerHTML = 'Unable to fetch status. <a href="javascript:location.reload()" style="color:var(--primary);text-decoration:underline;">Retry</a>';
+          }
+        }
       });
   }
 
