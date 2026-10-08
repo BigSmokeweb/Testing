@@ -180,6 +180,30 @@ class TestF13Reaper(unittest.TestCase):
             self.assertEqual(run.note, "Job was never picked up")
             self.assertIsNotNone(run.finished_at)
 
+    def test_reaped_run_not_executed_by_worker(self):
+        """A run already marked failed by reaper is skipped when its job arrives at run_job_entry."""
+        from app.worker import run_job_entry
+        from unittest.mock import patch
+
+        with Session(engine) as s:
+            u = _mk_user(s)
+            site = _mk_site(s, u.id, "f13skip")
+            run = _mk_run(s, u.id, site.id, status="failed")
+            run.note = "Job was never picked up"
+            s.add(run)
+            s.commit()
+            s.refresh(run)
+            r_id = run.id
+
+        with patch("app.worker.run_public_checks") as mock_crawl:
+            run_job_entry(r_id)
+            mock_crawl.assert_not_called()
+
+        with Session(engine) as s:
+            after = s.get(Run, r_id)
+            self.assertEqual(after.status, "failed")
+            self.assertEqual(after.note, "Job was never picked up")
+
 
 # ── F20: cleanup deletes expired credentials and old runs ─────────────────────
 

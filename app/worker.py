@@ -26,6 +26,10 @@ def run_job_entry(run_id: int):
     with Session(engine) as session:
         run = session.get(Run, run_id)
         if not run:
+            logger.warning(f"Run {run_id} not found in database; skipping.")
+            return
+        if run.status != "queued":
+            logger.info(f"Run {run_id} status is '{run.status}' (expected 'queued'); skipping execution.")
             return
         run.status = "running"
         session.add(run)
