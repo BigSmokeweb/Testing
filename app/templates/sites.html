@@ -8,11 +8,9 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">My Sites</h1>
-    <p class="page-subtitle">{{ sites|length }}/2 sites used — verify ownership to run automated tests</p>
+    <p class="page-subtitle">{{ sites|length }} site{{ 's' if sites|length != 1 else '' }} — verify ownership to run automated tests</p>
   </div>
-  {% if sites|length < 2 %}
-    <a href="/wizard" class="btn btn-primary">+ Add Site</a>
-  {% endif %}
+  <a href="/wizard" class="btn btn-primary">+ Add Site</a>
 </div>
 
 <!-- Flash messages -->
@@ -27,8 +25,7 @@
 </div>
 {% endif %}
 
-<!-- Add site inline form (only when under limit and not using wizard) -->
-{% if sites|length < 2 %}
+<!-- Add site inline form -->
 <div class="card" style="margin-bottom:var(--sp-6);">
   <h2 class="card-title" style="font-size:16px;">Quick Add</h2>
   <form method="POST" action="/sites" novalidate>
@@ -40,7 +37,7 @@
     </div>
   </form>
 </div>
-{% endif %}
+
 
 <!-- Sites list -->
 {% if sites %}

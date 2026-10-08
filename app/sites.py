@@ -129,7 +129,17 @@ def add_site_for_user(user_id: int, raw_url: str) -> Tuple[Optional[Site], Optio
 
 
 def get_user_sites(user_id: int) -> list[Site]:
+    """Return one site per domain (the most recently added), ordered newest first."""
     with Session(engine) as session:
-        return session.exec(
+        all_sites = session.exec(
             select(Site).where(Site.user_id == user_id).order_by(Site.id.desc())
         ).all()
+
+    # Deduplicate: first-seen per domain wins because we iterate newest→oldest
+    seen: set[str] = set()
+    unique: list[Site] = []
+    for site in all_sites:
+        if site.domain not in seen:
+            seen.add(site.domain)
+            unique.append(site)
+    return unique
