@@ -36,6 +36,12 @@ def generate_verify_token() -> str:
     return secrets.token_hex(16)
 
 
+import logging
+logger = logging.getLogger("autoqa_sites")
+
+MAX_VERIFY_FILE_BYTES = 100 * 1024  # 100 KB cap
+
+
 def check_dns_txt_record(domain: str, token: str) -> bool:
     """
     Checks if _autoqa.<domain> has a TXT record with value 'autoqa-verify=<token>'.
@@ -48,24 +54,30 @@ def check_dns_txt_record(domain: str, token: str) -> bool:
             for txt_string in rdata.strings:
                 if txt_string.decode("utf-8").strip() == expected:
                     return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"DNS TXT resolution failed for {record_name}: {e}")
     return False
 
 
 def check_well_known_file(url: str, token: str) -> bool:
     """
     Checks if <url>/.well-known/autoqa-<token>.txt returns the token.
-    Uses 5s timeout and avoids redirects to other domains.
+    Uses 5s timeout, stream=True, caps size to 100KB, avoids redirects.
     """
     file_url = f"{url.rstrip('/')}/.well-known/autoqa-{token}.txt"
     try:
-        resp = requests.get(file_url, timeout=5, allow_redirects=False)
+        resp = requests.get(file_url, timeout=5, allow_redirects=False, stream=True)
         if resp.status_code == 200:
-            if resp.text.strip() == token:
+            content = b""
+            for chunk in resp.iter_content(chunk_size=4096):
+                content += chunk
+                if len(content) > MAX_VERIFY_FILE_BYTES:
+                    logger.warning(f"Verification file exceeded size limit at {file_url}")
+                    return False
+            if content.decode("utf-8", errors="ignore").strip() == token:
                 return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Well-known verification fetch failed for {file_url}: {e}")
     return False
 
 

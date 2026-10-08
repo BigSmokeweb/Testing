@@ -1,7 +1,10 @@
 import os
 import sys
 import time
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger("autoqa_worker")
 import redis
 from rq import Worker, Queue
 from sqlmodel import Session, select
@@ -36,6 +39,15 @@ def run_job_entry(run_id: int):
     except Exception as e:
         status = "failed"
         err = str(e)
+        logger.error(f"Run {run_id} failed with error: {e}", exc_info=True)
+        # Record error diagnostic into a Page record for this run
+        try:
+            from app.models import Page
+            with Session(engine) as s:
+                s.add(Page(run_id=run_id, url="", status_code=500, load_ms=0, error=f"Worker error: {e}"))
+                s.commit()
+        except Exception as pe:
+            logger.error(f"Failed to record diagnostic page for run {run_id}: {pe}")
 
     duration_ms = int((time.time() - start_time) * 1000)
     finished_str = datetime.now(timezone.utc).isoformat()
