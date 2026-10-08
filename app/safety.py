@@ -113,3 +113,63 @@ def install_request_guard(context, on_blocked_callback=None):
             route.continue_()
 
     context.route("**/*", route_handler)
+
+
+def safe_http_fetch(
+    url: str,
+    method: str = "GET",
+    headers: dict = None,
+    cookies: dict = None,
+    timeout: int = 5,
+    max_redirects: int = 5,
+    max_bytes: int = 100 * 1024,  # 100 KB cap
+) -> Tuple[int, bytes, str]:
+    """
+    Safely fetches a URL via HTTP:
+    - Validates target URL with validate_url before every hop
+    - Manually follows up to max_redirects hops
+    - Does NOT send cookies to different hostnames on redirect
+    - Uses stream=True and aborts if content exceeds max_bytes
+    Returns (status_code, content_bytes, final_url).
+    """
+    import requests
+    current_url = url
+    current_cookies = cookies or {}
+    initial_host = urllib.parse.urlparse(url).netloc.lower()
+
+    for hop in range(max_redirects + 1):
+        safe, reason = validate_url(current_url)
+        if not safe:
+            raise ValueError(f"Blocked URL at hop {hop} ({current_url}): {reason}")
+
+        current_host = urllib.parse.urlparse(current_url).netloc.lower()
+        hop_cookies = current_cookies if current_host == initial_host else {}
+
+        resp = requests.request(
+            method,
+            current_url,
+            headers=headers or {},
+            cookies=hop_cookies,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=True,
+        )
+
+        if resp.is_redirect and "Location" in resp.headers:
+            if hop == max_redirects:
+                raise ValueError(f"Exceeded maximum redirects ({max_redirects})")
+            next_url = urllib.parse.urljoin(current_url, resp.headers["Location"])
+            current_url = next_url
+            continue
+
+        # Non-redirect: stream content up to max_bytes
+        content = b""
+        for chunk in resp.iter_content(chunk_size=4096):
+            content += chunk
+            if len(content) > max_bytes:
+                resp.close()
+                raise ValueError(f"Response body exceeded limit of {max_bytes} bytes")
+
+        return resp.status_code, content, current_url
+
+    raise ValueError("Unexpected redirect termination")

@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 from app.creds import delete_credentials, get_credentials
 from app.models import ConsoleLog, FlowResultModel, LinkCheck, NetworkFailure, Page, Run, Site, engine
 from app.monitors import MonitorCollector, attach, record_load_time
-from app.safety import install_request_guard, validate_url
+from app.safety import install_request_guard, validate_url, safe_http_fetch
 
 MAX_PAGES = 25
 MAX_DEPTH = 2
@@ -398,8 +398,7 @@ def run_public_checks(run_id: int) -> None:
                     })
                     continue
 
-                resp = requests.get(target_url, headers=headers, timeout=5, allow_redirects=True)
-                status = resp.status_code
+                status, _, _ = safe_http_fetch(target_url, headers=headers, timeout=5, max_redirects=5, max_bytes=100*1024)
                 link_results.append({
                     "run_id": run_id,
                     "source_url": source_url,

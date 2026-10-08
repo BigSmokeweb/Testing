@@ -102,14 +102,15 @@ def check_links(run_id: int) -> List[dict]:
 
         for source_url, target_url in collected:
             try:
-                resp = requests.get(
+                from app.safety import safe_http_fetch
+                status_code, _, _ = safe_http_fetch(
                     target_url,
                     cookies=cookies,
                     headers=headers,
                     timeout=10,
-                    allow_redirects=True,
+                    max_redirects=5,
+                    max_bytes=100 * 1024,
                 )
-                status_code = resp.status_code
                 ok = status_code < 400
             except Exception:
                 status_code = 0
