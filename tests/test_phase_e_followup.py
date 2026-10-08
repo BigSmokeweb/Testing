@@ -291,5 +291,95 @@ class TestF23ComparisonScope(unittest.TestCase):
         self.assertNotIn(f"/report/{self.run_u1_cur_id}", r.text)
 
 
+# ── S1 & run.note: Session versioning & failure notes ─────────────────────────
+
+class TestSessionVersionLogout(unittest.TestCase):
+    def setUp(self):
+        with Session(engine) as s:
+            self.user = _mk_user(s)
+            self.user_id = self.user.id
+            self.orig_version = self.user.session_version
+
+    @unittest.skipIf(__import__("os").getenv("LOCAL_MODE", "0") == "1", "Local mode bypasses auth checks by design")
+    def test_copied_cookie_invalid_after_logout(self):
+        # Client 1 logs in or creates token
+        token = create_session_token(self.user_id, session_version=self.orig_version)
+        client = TestClient(app, cookies={SESSION_COOKIE_NAME: token})
+
+        # Can access /history
+        r = client.get("/history")
+        self.assertEqual(r.status_code, 200)
+
+        # Logout via POST /logout with CSRF
+        from app.auth import generate_csrf_token
+        csrf = generate_csrf_token(token)
+        r_logout = client.post("/logout", data={"csrf_token": csrf}, follow_redirects=False)
+        self.assertEqual(r_logout.status_code, 303)
+
+        # Copied old token must now be rejected
+        attacker_client = TestClient(app, cookies={SESSION_COOKIE_NAME: token})
+        r_after = attacker_client.get("/history", follow_redirects=False)
+        self.assertIn(r_after.status_code, (302, 303, 307))
+        self.assertIn("/login", r_after.headers.get("location", ""))
+
+    @unittest.skipIf(__import__("os").getenv("LOCAL_MODE", "0") == "1", "Local mode bypasses auth checks by design")
+    def test_old_version_cookie_rejected(self):
+        # Token with version 0 or older
+        old_token = create_session_token(self.user_id, session_version=self.orig_version - 1)
+        client = TestClient(app, cookies={SESSION_COOKIE_NAME: old_token})
+        r = client.get("/history", follow_redirects=False)
+        self.assertIn(r.status_code, (302, 303, 307))
+        self.assertIn("/login", r.headers.get("location", ""))
+
+    def test_get_logout_does_not_invalidate_session(self):
+        token = create_session_token(self.user_id, session_version=self.orig_version)
+        client = TestClient(app, cookies={SESSION_COOKIE_NAME: token})
+
+        # GET /logout returns confirmation HTML page, does NOT logout
+        r = client.get("/logout")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Confirm Logout", r.text)
+
+        # Session is still valid
+        r_hist = client.get("/history")
+        self.assertEqual(r_hist.status_code, 200)
+
+        # User version unchanged in DB
+        with Session(engine) as s:
+            u = s.get(User, self.user_id)
+            self.assertEqual(u.session_version, self.orig_version)
+
+    def test_post_logout_without_csrf_fails(self):
+        token = create_session_token(self.user_id, session_version=self.orig_version)
+        client = TestClient(app, cookies={SESSION_COOKIE_NAME: token})
+        r = client.post("/logout", data={"csrf_token": "invalid_csrf"})
+        self.assertEqual(r.status_code, 400)
+        # Session still active
+        r_hist = client.get("/history")
+        self.assertEqual(r_hist.status_code, 200)
+
+
+class TestRunNoteDisplay(unittest.TestCase):
+    def test_failed_run_note_shown_in_report(self):
+        with Session(engine) as s:
+            u = _mk_user(s)
+            site = _mk_site(s, u.id, "runnote")
+            run = _mk_run(s, u.id, site.id)
+            run.status = "failed"
+            run.note = "worker died or timed out"
+            s.add(run)
+            s.commit()
+            s.refresh(run)
+            run_id = run.id
+            user_id = u.id
+
+        client = TestClient(app, cookies={SESSION_COOKIE_NAME: create_session_token(user_id, 1)})
+        r = client.get(f"/report/{run_id}")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("worker died or timed out", r.text)
+        self.assertIn("run-note-banner", r.text)
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -6,6 +6,7 @@ Phase B security probes:
 - XSS escaping in report
 - Path traversal
 """
+import os
 import re
 import uuid
 import unittest
@@ -127,6 +128,7 @@ class TestIDOR(unittest.TestCase):
             s.refresh(run)
             cls.run1_id = run.id
 
+    @unittest.skipIf(os.getenv("LOCAL_MODE", "0") == "1", "Local mode bypasses ownership checks by design")
     def test_idor_report(self):
         res = self.c2.get(f"/report/{self.run1_id}", follow_redirects=True)
         leaked = res.status_code == 200 and "idor-test.example.com" in res.text
@@ -134,6 +136,7 @@ class TestIDOR(unittest.TestCase):
         if leaked:
             self.fail("IDOR BUG: user2 can view user1 run report")
 
+    @unittest.skipIf(os.getenv("LOCAL_MODE", "0") == "1", "Local mode bypasses ownership checks by design")
     def test_idor_run_status(self):
         res = self.c2.get(f"/runs/{self.run1_id}/status", follow_redirects=False)
         print(f"\n[IDOR-STATUS] status={res.status_code}")
