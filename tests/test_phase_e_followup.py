@@ -160,6 +160,26 @@ class TestF13Reaper(unittest.TestCase):
             self.assertEqual(run.status, "running",
                              "Fresh run must not be reaped")
 
+    def test_reaper_marks_stuck_queued_run_failed(self):
+        with Session(engine) as s:
+            u = _mk_user(s)
+            site = _mk_site(s, u.id, "f13queued")
+            old_queued = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+            stuck_q_run = _mk_run(s, u.id, site.id, status="queued", started_at=old_queued)
+            stuck_q_run.queued_at = old_queued
+            s.add(stuck_q_run)
+            s.commit()
+            s.refresh(stuck_q_run)
+            q_id = stuck_q_run.id
+
+        reaped = reap_stuck_runs(timeout_minutes=10, queued_timeout_minutes=15)
+        self.assertGreaterEqual(reaped, 1)
+        with Session(engine) as s:
+            run = s.get(Run, q_id)
+            self.assertEqual(run.status, "failed")
+            self.assertEqual(run.note, "Job was never picked up")
+            self.assertIsNotNone(run.finished_at)
+
 
 # ── F20: cleanup deletes expired credentials and old runs ─────────────────────
 

@@ -59,18 +59,23 @@ def run_job_entry(run_id: int):
 
 
 
-def reap_stuck_runs(timeout_minutes: int = 10) -> int:
+def reap_stuck_runs(timeout_minutes: int = 10, queued_timeout_minutes: int = 15) -> int:
     """
-    Reaps runs stuck in 'running' for more than timeout_minutes (10 min).
+    Reaps:
+    - Runs stuck in 'running' for more than timeout_minutes (10 min).
+    - Runs stuck in 'queued' for more than queued_timeout_minutes (15 min).
     Marks them as 'failed' with finished_at timestamp.
     """
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
     cutoff_iso = cutoff.isoformat()
+    queued_cutoff = datetime.now(timezone.utc) - timedelta(minutes=queued_timeout_minutes)
+    queued_cutoff_iso = queued_cutoff.isoformat()
     now_iso = datetime.now(timezone.utc).isoformat()
     reaped = 0
 
     with Session(engine) as session:
+        # 1. Stuck running runs
         stuck_runs = session.exec(
             select(Run).where(Run.status == "running", Run.started_at < cutoff_iso)
         ).all()
@@ -80,6 +85,25 @@ def reap_stuck_runs(timeout_minutes: int = 10) -> int:
             r.note = "Worker died or timed out (no response for >10 minutes)"
             session.add(r)
             reaped += 1
+
+        # 2. Stuck queued runs (e.g. Redis crash or worker failure to pick up)
+        from sqlalchemy import or_
+        stuck_queued = session.exec(
+            select(Run).where(
+                Run.status == "queued",
+                or_(
+                    Run.queued_at < queued_cutoff_iso,
+                    (Run.queued_at == None) & (Run.started_at < queued_cutoff_iso),
+                )
+            )
+        ).all()
+        for r in stuck_queued:
+            r.status = "failed"
+            r.finished_at = now_iso
+            r.note = "Job was never picked up"
+            session.add(r)
+            reaped += 1
+
         if reaped:
             session.commit()
     return reaped
