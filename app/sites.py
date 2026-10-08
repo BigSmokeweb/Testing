@@ -62,20 +62,19 @@ def check_dns_txt_record(domain: str, token: str) -> bool:
 def check_well_known_file(url: str, token: str) -> bool:
     """
     Checks if <url>/.well-known/autoqa-<token>.txt returns the token.
-    Uses 5s timeout, stream=True, caps size to 100KB, avoids redirects.
+    Uses safe_http_fetch (5s timeout, stream=True, caps size to 100KB, validates IPs).
     """
     file_url = f"{url.rstrip('/')}/.well-known/autoqa-{token}.txt"
     try:
-        resp = requests.get(file_url, timeout=5, allow_redirects=False, stream=True)
-        if resp.status_code == 200:
-            content = b""
-            for chunk in resp.iter_content(chunk_size=4096):
-                content += chunk
-                if len(content) > MAX_VERIFY_FILE_BYTES:
-                    logger.warning(f"Verification file exceeded size limit at {file_url}")
-                    return False
-            if content.decode("utf-8", errors="ignore").strip() == token:
-                return True
+        from app.safety import safe_http_fetch
+        status_code, content, _ = safe_http_fetch(
+            file_url,
+            timeout=5,
+            max_redirects=0,
+            max_bytes=MAX_VERIFY_FILE_BYTES,
+        )
+        if status_code == 200 and content.decode("utf-8", errors="ignore").strip() == token:
+            return True
     except Exception as e:
         logger.warning(f"Well-known verification fetch failed for {file_url}: {e}")
     return False
