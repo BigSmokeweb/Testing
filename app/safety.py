@@ -96,19 +96,20 @@ def validate_url(url: str) -> Tuple[bool, str]:
     return True, ""
 
 
-async def install_request_guard(context, on_blocked_callback=None):
+def install_request_guard(context, on_blocked_callback=None):
     """
     Playwright route guard: validates EVERY request URL including redirects.
     Aborts blocked requests and invokes on_blocked_callback(url, reason) if provided.
+    Works with sync Playwright context.
     """
-    async def route_handler(route):
+    def route_handler(route):
         req = route.request
         valid, reason = validate_url(req.url)
         if not valid:
             if on_blocked_callback:
                 on_blocked_callback(req.url, reason)
-            await route.abort()
+            route.abort()
         else:
-            await route.continue_()
+            route.continue_()
 
-    await context.route("**/*", route_handler)
+    context.route("**/*", route_handler)

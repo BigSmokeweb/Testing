@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}AutoQA — Run #{{ run.id }} Progress{% endblock %}
+
+{% block content %}
+<div class="progress-page status-{{ run.status }}" id="progress-wrap" aria-live="polite" aria-atomic="true">
+
+  <!-- Terminal icon / spinner -->
+  <div class="progress-spinner" id="progress-spinner" aria-hidden="true"></div>
+  <div class="progress-done-icon" id="progress-done" aria-hidden="true">
+    {% if run.status == 'completed' %}✅
+    {% elif run.status == 'failed' %}❌
+    {% elif run.status == 'expired' %}⏳
+    {% else %}⏱
+    {% endif %}
+  </div>
+
+  <h1 class="progress-status" id="progress-status-text">
+    {% if run.status == 'queued'    %}Queued
+    {% elif run.status == 'running' %}Running
+    {% elif run.status == 'completed' %}Completed!
+    {% elif run.status == 'failed'  %}Failed
+    {% elif run.status == 'expired' %}Session Expired
+    {% else %}{{ run.status | title }}
+    {% endif %}
+  </h1>
+
+  <p class="progress-sub" id="progress-sub-text">
+    {% if run.status == 'queued'    %}Your test is waiting in the queue. A worker will pick it up shortly.
+    {% elif run.status == 'running' %}Crawling your site — this typically takes 1–3 minutes.
+    {% elif run.status == 'completed' %}All checks finished. Redirecting to your report…
+    {% elif run.status == 'failed'  %}An error occurred during the test run. You can try again from My Sites.
+    {% elif run.status == 'expired' %}The test account session expired (CAPTCHA, MFA, or SSO detected). Check the report for details.
+    {% else %}Status: {{ run.status }}
+    {% endif %}
+  </p>
+
+  <div class="progress-meta" aria-label="Run statistics">
+    <div class="progress-meta-item">
+      <div class="progress-meta-val" id="prog-pages">—</div>
+      <div class="progress-meta-label">Pages</div>
+    </div>
+    <div class="progress-meta-item">
+      <div class="progress-meta-val font-mono" id="prog-elapsed">
+        {% if run.started_at %}{{ "0:00" }}{% else %}—{% endif %}
+      </div>
+      <div class="progress-meta-label">Elapsed</div>
+    </div>
+    <div class="progress-meta-item">
+      <div class="progress-meta-val" id="prog-run-id">#{{ run.id }}</div>
+      <div class="progress-meta-label">Run ID</div>
+    </div>
+  </div>
+
+  {% if run.status in ['failed', 'expired'] %}
+  <a href="/sites" class="btn btn-ghost" style="margin:0 auto;">← Back to My Sites</a>
+  {% elif run.status == 'completed' %}
+  <a href="/report/{{ run.id }}" class="btn btn-primary btn-lg" style="margin:0 auto;" id="view-report-btn">View Report →</a>
+  {% endif %}
+
+</div>
+
+<script>
+(function () {
+  var runId    = {{ run.id }};
+  var status   = {{ run.status | tojson }};
+  var startedAt = {{ run.started_at | tojson if run.started_at else 'null' }};
+  var interval = null;
+  var pollFailures = 0;
+
+  // Elapsed timer
+  var elapsedEl = document.getElementById('prog-elapsed');
+  var startTs = startedAt ? new Date(startedAt + (startedAt.endsWith('Z') ? '' : 'Z')).getTime() : null;
+
+  function formatElapsed(ms) {
+    var s = Math.floor(ms / 1000);
+    var m = Math.floor(s / 60);
+    s = s % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  var timerTick = null;
+  function startElapsedTimer() {
+    if (!startTs) return;
+    timerTick = setInterval(function () {
+      if (elapsedEl) elapsedEl.textContent = formatElapsed(Date.now() - startTs);
+    }, 1000);
+  }
+
+  function applyStatus(data) {
+    status = data.status;
+    var wrap = document.getElementById('progress-wrap');
+    wrap.className = 'progress-page status-' + status;
+
+    var statusMap = {
+      queued: 'Queued',
+      running: 'Running…',
+      completed: 'Completed!',
+      failed: 'Failed',
+      expired: 'Session Expired'
+    };
+    var subMap = {
+      queued: 'Your test is waiting in the queue.',
+      running: 'Crawling your site — this typically takes 1–3 minutes.',
+      completed: 'All checks finished. Redirecting to your report…',
+      failed: 'An error occurred. You can try again from My Sites.',
+      expired: 'Session expired (CAPTCHA / MFA / SSO detected). Check the report for details.'
+    };
+
+    var st = document.getElementById('progress-status-text');
+    var sb = document.getElementById('progress-sub-text');
+    if (st) st.textContent = statusMap[status] || status;
+    if (sb) sb.textContent = subMap[status] || '';
+
+    if (data.status === 'completed') {
+      clearInterval(interval);
+      if (timerTick) clearInterval(timerTick);
+      setTimeout(function () {
+        window.location.href = '/report/' + runId;
+      }, 1800);
+    } else if (data.status === 'failed' || data.status === 'expired') {
+      clearInterval(interval);
+      if (timerTick) clearInterval(timerTick);
+    }
+  }
+
+  function poll() {
+    fetch('/runs/' + runId + '/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        pollFailures = 0;
+        applyStatus(data);
+        // update page count if available
+        if (data.pages_checked !== undefined) {
+          var pe = document.getElementById('prog-pages');
+          if (pe) pe.textContent = data.pages_checked;
+        }
+      })
+      .catch(function () {
+        pollFailures++;
+        if (pollFailures >= 5) clearInterval(interval);
+      });
+  }
+
+  if (status === 'queued' || status === 'running') {
+    startElapsedTimer();
+    poll();
+    interval = setInterval(poll, 3000);
+  } else if (startTs && elapsedEl && status === 'completed') {
+    // Show final duration
+    if ({{ run.duration_ms or 0 }}) {
+      elapsedEl.textContent = formatElapsed({{ run.duration_ms or 0 }});
+    }
+  }
+})();
+</script>
+{% endblock %}

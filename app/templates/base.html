@@ -4,27 +4,58 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AutoQA{% endblock %}</title>
+  <meta name="description" content="{% block meta_desc %}Automated website quality and reliability testing — broken links, console errors, page load, and more.{% endblock %}">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <a href="/" class="logo">AutoQA</a>
-      <nav>
-        <a href="/">Home</a>
-        {% if user %}
-        <a href="/sites">My Sites</a>
-        <a href="/history">History</a>
-        <span style="color: #64748b; font-size: 14px; margin-left: 12px;">{{ user.email }}</span>
-        <a href="/logout" style="margin-left: 8px;">Logout</a>
-        {% else %}
-        <a href="/login">Login</a>
-        <a href="/register">Register</a>
-        {% endif %}
-      </nav>
-    </header>
 
+<nav class="navbar" role="navigation" aria-label="Main navigation">
+  <div class="navbar-inner">
+    <a href="/" class="logo" aria-label="AutoQA Home">
+      <span class="logo-dot" aria-hidden="true"></span>
+      AutoQA
+    </a>
+
+    <div class="nav-links">
+      {% if user %}
+        <a href="/sites" {% if request.url.path == '/sites' %}class="active" aria-current="page"{% endif %}>My Sites</a>
+        <a href="/history" {% if request.url.path == '/history' %}class="active" aria-current="page"{% endif %}>History</a>
+      {% else %}
+        <a href="/#features">Features</a>
+        <a href="/#how">How it works</a>
+      {% endif %}
+    </div>
+
+    <div class="nav-user">
+      {% if user %}
+        <span class="nav-email" title="{{ user.email }}">{{ user.email }}</span>
+        <a href="/logout" class="nav-btn nav-btn-ghost">Logout</a>
+      {% else %}
+        <a href="/login" class="nav-btn nav-btn-ghost">Log in</a>
+        <a href="/register" class="nav-btn">Get started →</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+{% block body %}
+<main class="page-wrapper" role="main">
+  <div class="container">
     {% block content %}{% endblock %}
   </div>
+</main>
+{% endblock %}
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <span><strong style="color: var(--text-muted);">AutoQA</strong> &copy; 2026 — Automated Web Quality Assurance.</span>
+    <nav class="footer-links" aria-label="Footer navigation">
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
 </body>
 </html>

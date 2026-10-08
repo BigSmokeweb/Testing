@@ -1,0 +1,136 @@
+# docker-compose.yml — AutoQA
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  artifacts_data:
+  caddy_data:
+  caddy_config:
+
+# ── Networks ───────────────────────────────────────────────────────────────────
+networks:
+  # Internal network: web ↔ redis ↔ postgres (no outbound internet)
+  internal:
+    driver: bridge
+
+  # Worker external network: can crawl websites
+  # Host iptables rules prevent it from reaching private IP ranges (see README)
+  worker_external:
+    driver: bridge
+
+# ── Services ───────────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-autoqa}
+      POSTGRES_USER:     ${POSTGRES_USER:-autoqa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?err}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoqa} -d ${POSTGRES_DB:-autoqa}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Web (FastAPI + uvicorn) ─────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-autoqa}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-autoqa}
+      REDIS_URL:    redis://redis:6379/0
+      SECRET_KEY:   ${SECRET_KEY:?err}
+      FERNET_KEY:   ${FERNET_KEY:?err}
+      LOCAL_MODE:   ${LOCAL_MODE:-0}
+      SKIP_OWNERSHIP_FOR_DEV: ${SKIP_OWNERSHIP_FOR_DEV:-0}
+    volumes:
+      - ./app:/app/app:ro
+      - artifacts_data:/app/artifacts
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── Worker (RQ + Playwright) ────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-autoqa}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-autoqa}
+      REDIS_URL:    redis://redis:6379/0
+      FERNET_KEY:   ${FERNET_KEY:?err}
+      SKIP_OWNERSHIP_FOR_DEV: ${SKIP_OWNERSHIP_FOR_DEV:-0}
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    volumes:
+      - ./app:/app/app:ro
+      - artifacts_data:/app/artifacts
+    networks:
+      # Internal → reach Redis and Postgres
+      # worker_external → crawl websites (host iptables blocks private ranges)
+      - internal
+      - worker_external
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis, os; r=redis.from_url(os.environ['REDIS_URL']); r.ping()"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── Caddy (reverse proxy + automatic HTTPS) ─────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?err}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      web:
+        condition: service_healthy

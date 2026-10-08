@@ -58,6 +58,15 @@ class Run(SQLModel, table=True):
     site_id: Optional[int] = Field(default=None)
     mode: Optional[str] = Field(default=None)  # public | credentials
     queued_at: Optional[str] = Field(default=None)
+    score: Optional[int] = Field(default=None)  # 0-100 percentage of pages OK
+
+
+class Usage(SQLModel, table=True):
+    __tablename__ = "usage"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    date: str = Field(index=True)  # YYYY-MM-DD
+    runs_count: int = Field(default=0)
 
 
 class FlowResultModel(SQLModel, table=True):
@@ -112,6 +121,29 @@ class LinkCheck(SQLModel, table=True):
     target_url: str
     status_code: int
     ok: bool
+
+
+class Page(SQLModel, table=True):
+    __tablename__ = "pages"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="runs.id", index=True)
+    url: str
+    status_code: int
+    load_ms: int = 0
+    screenshot_path: Optional[str] = None
+    error: Optional[str] = None
+
+
+class SiteCredential(SQLModel, table=True):
+    __tablename__ = "site_credentials"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    site_id: int = Field(foreign_key="sites.id", index=True)
+    login_url: str
+    username_enc: str
+    password_enc: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime = Field(index=True)
+
 
 
 def init_db():

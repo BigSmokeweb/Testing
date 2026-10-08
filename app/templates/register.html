@@ -1,35 +1,78 @@
 {% extends "base.html" %}
-{% block title %}Register - AutoQA{% endblock %}
+{% block title %}Create Account — AutoQA{% endblock %}
+{% block meta_desc %}Join AutoQA for free and start automated quality testing on your verified domains.{% endblock %}
 
-{% block content %}
-<div style="max-width: 420px; margin: 40px auto; padding: 24px; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
-  <h2 style="margin-top: 0; font-size: 24px; color: #1e293b; font-weight: 700; text-align: center;">Create Account</h2>
-  
-  {% if error %}
-  <div style="background-color: #fef2f2; border: 1px solid #f87171; color: #991b1b; padding: 12px; border-radius: 6px; font-size: 14px; margin-bottom: 16px;">
-    {{ error }}
+{% block body %}
+<div class="auth-page">
+  <div class="auth-card">
+
+    <div class="auth-logo">
+      <div class="logo-mark" aria-hidden="true">⚡</div>
+      <h1 class="auth-title">Create your account</h1>
+      <p class="auth-sub">Free. No credit card required.</p>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-error" role="alert" aria-live="polite">
+      <span class="alert-icon" aria-hidden="true">⚠</span>
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/register" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+      <div class="form-group">
+        <label for="email" class="form-label">Email address</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          required
+          value="{{ email or '' }}"
+          class="form-input"
+          autocomplete="email"
+          aria-required="true"
+          placeholder="you@example.com"
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="password" class="form-label">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          required
+          class="form-input"
+          autocomplete="new-password"
+          aria-required="true"
+          aria-describedby="pw-hint"
+          placeholder="••••••••"
+          minlength="8"
+        >
+        <span id="pw-hint" style="font-size:12px;color:var(--text-faint);margin-top:4px;display:block;">Minimum 8 characters</span>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full btn-lg" id="register-submit-btn"
+              onclick="this.classList.add('loading')">
+        Create Account
+      </button>
+    </form>
+
+    <p class="auth-footer-link">
+      Already have an account? <a href="/login">Log in →</a>
+    </p>
   </div>
-  {% endif %}
-
-  <form method="POST" action="/register">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    
-    <div style="margin-bottom: 16px;">
-      <label for="email" style="display: block; font-weight: 500; font-size: 14px; color: #334155; margin-bottom: 6px;">Email address</label>
-      <input type="email" id="email" name="email" required value="{{ email or '' }}" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; outline: none;">
-    </div>
-
-    <div style="margin-bottom: 20px;">
-      <label for="password" style="display: block; font-weight: 500; font-size: 14px; color: #334155; margin-bottom: 6px;">Password</label>
-      <input type="password" id="password" name="password" required style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; outline: none;">
-      <span style="font-size: 12px; color: #64748b;">Minimum 8 characters</span>
-    </div>
-
-    <button type="submit" style="width: 100%; background: #2563eb; color: #fff; font-weight: 600; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px;">Register</button>
-  </form>
-
-  <p style="text-align: center; font-size: 14px; color: #64748b; margin-top: 20px; margin-bottom: 0;">
-    Already have an account? <a href="/login" style="color: #2563eb; text-decoration: none;">Log in</a>
-  </p>
 </div>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <span style="color:var(--text-faint);font-size:13px;">AutoQA &copy; 2026</span>
+    <nav class="footer-links" aria-label="Footer navigation">
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+  </div>
+</footer>
 {% endblock %}

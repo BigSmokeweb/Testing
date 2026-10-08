@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}500 — Server Error · AutoQA{% endblock %}
+{% block content %}
+<div class="error-page">
+  <div class="error-code">500</div>
+  <h1 class="error-title">Something went wrong</h1>
+  <p class="error-sub">An unexpected server error occurred. Please try again in a moment. If the problem persists, contact support.</p>
+  <div style="display:flex;gap:var(--sp-3);justify-content:center;flex-wrap:wrap;">
+    <a href="/" class="btn btn-primary">Go Home</a>
+    <button onclick="window.location.reload()" class="btn btn-ghost">Retry</button>
+  </div>
+</div>
+{% endblock %}

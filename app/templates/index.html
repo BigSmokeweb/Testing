@@ -1,46 +1,171 @@
 {% extends "base.html" %}
-{% block title %}AutoQA - Home{% endblock %}
+{% block title %}AutoQA — Automated Website Quality & Reliability Testing{% endblock %}
+{% block meta_desc %}AutoQA crawls your verified domains to find broken links, JavaScript errors, HTTP failures, and slow pages — with evidence screenshots. Free. No install.{% endblock %}
 
-{% block content %}
-<div class="card">
-  <h2>Session Status</h2>
-  {% if session_valid %}
-    <div class="alert-box alert-valid">
-      ✓ Session is VALID. Tests are ready to run against <code>{{ config.base_url }}</code>.
-    </div>
-  {% else %}
-    <div class="alert-box alert-expired">
-      ⚠ Session expired or missing. Run: <code>python -m app.session connect</code> in terminal to authenticate.
-    </div>
-  {% endif %}
+{% block body %}
+<main role="main">
 
-  <form method="POST" action="/run">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="engine"><strong>Select Engine:</strong></label>
-    <div class="form-group">
-      <select name="engine" id="engine">
-        {% for eng in config.engines %}
-          <option value="{{ eng }}">{{ eng }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" {% if not session_valid %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
-        Run Suite
-      </button>
-    </div>
-  </form>
-</div>
+<!-- ── Hero ─────────────────────────────────────────────────────────── -->
+<section class="landing-hero" aria-labelledby="hero-heading">
+  <div class="hero-tag">
+    <span class="hero-tag-dot" aria-hidden="true"></span>
+    Automated Web Testing · SSRF-Protected Crawler
+  </div>
 
-{% if latest_run %}
-<div class="card">
-  <h2>Latest Run Summary</h2>
-  <p><strong>Run ID:</strong> #{{ latest_run.id }}</p>
-  <p><strong>Status:</strong> <span class="badge badge-{{ latest_run.status }}">{{ latest_run.status }}</span></p>
-  <p><strong>Engine:</strong> {{ latest_run.engine }}</p>
-  <p><strong>Duration:</strong> {{ latest_run.duration_ms }} ms</p>
-  <p><strong>Started:</strong> {{ latest_run.started_at }}</p>
-  <p style="margin-top: 10px;">
-    <a href="/report/{{ latest_run.id }}" style="color: var(--primary); font-weight: 600;">View Full Report &rarr;</a>
+  <h1 class="hero-title" id="hero-heading">
+    Catch bugs before<br>
+    <span>your users do</span>
+  </h1>
+
+  <p class="hero-sub">
+    AutoQA crawls your verified domains to detect broken links, uncaught JavaScript errors,
+    HTTP failures, and slow page loads — with screenshot proof.
   </p>
+
+  <div class="hero-input-card">
+    <form method="POST" action="/wizard/start" class="hero-form" id="hero-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="hero-input-row">
+        <label for="hero-url" class="sr-only">Website URL</label>
+        <input
+          type="url"
+          id="hero-url"
+          name="url"
+          placeholder="https://yourwebsite.com"
+          required
+          class="hero-url-input"
+          autocomplete="url"
+          aria-label="Enter your website URL"
+        >
+        <button type="submit" class="btn btn-primary hero-cta" id="hero-submit-btn"
+                onclick="this.classList.add('loading')">
+          Test my website →
+        </button>
+      </div>
+    </form>
+    <p class="hero-note" aria-label="Key benefits">
+      <span class="hero-note-item">Free automated crawl</span>
+      <span class="hero-note-item">Up to 25 pages</span>
+      <span class="hero-note-item">Evidence screenshots</span>
+      <span class="hero-note-item">No install required</span>
+    </p>
+  </div>
+</section>
+
+<!-- ── Features ─────────────────────────────────────────────────────── -->
+<section class="section container" id="features" aria-labelledby="features-heading">
+  <p class="section-label" aria-hidden="true">What we test</p>
+  <h2 class="section-title" id="features-heading">Everything that can go wrong</h2>
+  <p class="section-sub">Every automated test checks your public or authenticated site against critical failure points.</p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+      </div>
+      <h3>Page Availability</h3>
+      <p>Checks HTTP response status on every crawled page. Detects server errors and crashes instantly.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--amber)"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <h3>Console Errors</h3>
+      <p>Catches uncaught JavaScript exceptions and browser console errors that ruin visitor experience.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--red)"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </div>
+      <h3>Broken Links</h3>
+      <p>Discovers and validates all internal links to identify 404 dead-ends and broken anchors.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#818cf8"><path d="M1 6l11 6 11-6"/><path d="M1 12l11 6 11-6"/></svg>
+      </div>
+      <h3>Failed Requests</h3>
+      <p>Monitors background API calls and network assets, flagging 4xx and 5xx network dropouts.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </div>
+      <h3>Page Load Time</h3>
+      <p>Measures precise navigation timing across all pages to highlight slow bottlenecks.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <h3>Optional Test Login</h3>
+      <p>Mode A supports test account authentication with automated CAPTCHA, MFA, and SSO detection.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── How it works ──────────────────────────────────────────────────── -->
+<section class="section container" id="how" aria-labelledby="how-heading">
+  <p class="section-label" aria-hidden="true">How it works</p>
+  <h2 class="section-title" id="how-heading">Three steps to your first report</h2>
+  <p class="section-sub">From URL to actionable insights in minutes. No configuration. No agents to install.</p>
+
+  <div class="how-grid">
+    <div class="how-step">
+      <div class="how-number" aria-hidden="true">1</div>
+      <h3>Enter URL</h3>
+      <p>Add your website URL. AutoQA sanitizes and resolves domain safety to prevent SSRF abuse.</p>
+    </div>
+    <div class="how-step">
+      <div class="how-number" aria-hidden="true">2</div>
+      <h3>Verify Ownership</h3>
+      <p>Prove ownership via a fast DNS TXT record or a lightweight <code>.well-known</code> file.</p>
+    </div>
+    <div class="how-step">
+      <div class="how-number" aria-hidden="true">3</div>
+      <h3>Get Your Report</h3>
+      <p>Our headless Playwright worker crawls and delivers an actionable report with screenshot evidence.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── v1 company panel (only shown in LOCAL_MODE) ───────────────────── -->
+{% if session_valid or latest_run %}
+<div class="container">
+  <div class="company-panel">
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">⚙ Company Suite (v1 Local Mode)</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+      <div>
+        <span style="font-size:13px;color:var(--text-muted);">Configured URL: <code>{{ config.base_url }}</code></span>
+        {% if latest_run %}
+          <span style="margin-left:12px;font-size:13px;">Latest Run: #{{ latest_run.id }} ({{ latest_run.status }})</span>
+        {% endif %}
+      </div>
+      <form method="POST" action="/run" style="margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="engine" value="chromium">
+        <button type="submit" class="btn btn-ghost btn-sm">Run Company Suite</button>
+      </form>
+    </div>
+  </div>
 </div>
 {% endif %}
+
+</main>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <span><strong style="color:var(--text-muted);">AutoQA</strong> &copy; 2026 — Automated Web Quality Assurance.</span>
+    <nav class="footer-links" aria-label="Footer navigation">
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+  </div>
+</footer>
+
 {% endblock %}

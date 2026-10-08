@@ -1,132 +1,289 @@
 {% extends "base.html" %}
-{% block title %}AutoQA - Run #{{ run.id }} Report{% endblock %}
+{% block title %}AutoQA — Run #{{ run.id }} Report{% endblock %}
+{% block meta_desc %}Automated QA report for Run #{{ run.id }} — pages checked, errors, broken links, and load time.{% endblock %}
 
 {% block content %}
-<div class="card">
-  <h2>Run #{{ run.id }} Details</h2>
-  <p><strong>Status:</strong> <span class="badge badge-{{ run.status }}">{{ run.status }}</span></p>
-  <p><strong>Engine:</strong> {{ run.engine }}</p>
-  <p><strong>Duration:</strong> {{ run.duration_ms }} ms</p>
-  <p><strong>Started:</strong> {{ run.started_at }}</p>
-  <p><strong>Finished:</strong> {{ run.finished_at }}</p>
+
+<!-- Page header -->
+<div class="page-header no-print">
+  <div>
+    <h1 class="page-title">
+      Run #{{ run.id }}
+      <span class="badge badge-{{ run.status }}" style="font-size:14px;vertical-align:middle;margin-left:8px;">{{ run.status }}</span>
+    </h1>
+    <p class="page-subtitle">
+      {% if site %}{{ site.domain }} · {% elif run.site %}{{ run.site.domain }} · {% endif %}
+      {{ run.started_at[:16].replace('T', ' ') if run.started_at else 'Unknown date' }}
+      {% if run.duration_ms %} · {{ (run.duration_ms / 1000) | round(1) }}s{% endif %}
+    </p>
+  </div>
+  <div style="display:flex;gap:var(--sp-3);align-items:center;">
+    <button onclick="window.print()" class="btn btn-ghost btn-sm" aria-label="Print report">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      Print
+    </button>
+    <a href="/history" class="btn btn-ghost btn-sm">← History</a>
+  </div>
 </div>
 
+<!-- ── Summary Stats ──────────────────────────────────────────────── -->
+<div class="report-summary" role="region" aria-label="Run summary">
+  <div class="stat-card stat-score">
+    <div class="stat-val" aria-label="Score">{{ run.score | int if run.score is not none else '—' }}{% if run.score is not none %}<span style="font-size:20px;">%</span>{% endif %}</div>
+    <div class="stat-label">Score</div>
+  </div>
+  <div class="stat-card stat-pages">
+    <div class="stat-val" aria-label="Pages checked">{{ pages | length if pages else 0 }}</div>
+    <div class="stat-label">Pages checked</div>
+  </div>
+  <div class="stat-card stat-errors">
+    <div class="stat-val" aria-label="Error pages">{{ error_pages | length if error_pages else 0 }}</div>
+    <div class="stat-label">Error pages</div>
+  </div>
+  <div class="stat-card stat-broken">
+    <div class="stat-val" aria-label="Broken links">{{ broken_links | length if broken_links else 0 }}</div>
+    <div class="stat-label">Broken links</div>
+  </div>
+  <div class="stat-card stat-time">
+    <div class="stat-val" aria-label="Average load time">{{ avg_load_ms | int if avg_load_ms else '—' }}<span style="font-size:14px;"> ms</span></div>
+    <div class="stat-label">Avg load</div>
+  </div>
+</div>
+
+<!-- ── Comparison with previous run ─────────────────────────────────── -->
 {% if previous_run %}
-<div class="card">
-  <h2>New Failures Since Last Run (vs #{{ previous_run.id }})</h2>
+<div class="card" role="region" aria-label="Comparison with previous run">
+  <h2 class="card-title">Compared to Run #{{ previous_run.id }}</h2>
   {% if new_failures %}
-    <p style="color: #fca5a5; margin-bottom: 12px;"><strong>{{ new_failures | length }}</strong> flow(s) failed in this run that passed or did not exist in run #{{ previous_run.id }}:</p>
-    <ul>
+    <div class="alert alert-error" style="margin-bottom:var(--sp-4);">
+      <span class="alert-icon" aria-hidden="true">⚠</span>
+      <strong>{{ new_failures | length }} new issue(s)</strong> compared to run #{{ previous_run.id }}.
+    </div>
+    <ul style="list-style:none;padding:0;">
       {% for nf in new_failures %}
-        <li style="margin-left: 20px; color: var(--status-fail);">
-          <strong>{{ nf.flow.name }}</strong> (Duration: {{ nf.result.duration_ms }}ms)
-        </li>
+      <li style="padding:var(--sp-3) var(--sp-4);background:var(--red-bg);border:1px solid rgba(239,68,68,0.2);border-radius:var(--r-sm);margin-bottom:var(--sp-2);font-size:14px;">
+        <span class="comparison-new">NEW ↑</span> &nbsp;
+        <code style="font-family:var(--font-mono);font-size:13px;">{{ nf.flow.name if nf.flow is defined else nf }}</code>
+      </li>
       {% endfor %}
     </ul>
   {% else %}
-    <p style="color: var(--status-pass);">✓ No new failures compared to run #{{ previous_run.id }} on {{ run.engine }}.</p>
+    <div class="alert alert-success">
+      <span class="alert-icon" aria-hidden="true">✓</span>
+      No new failures compared to run #{{ previous_run.id }}
+    </div>
   {% endif %}
 </div>
 {% endif %}
 
-<div class="card">
-  <h2>Flow Results</h2>
-  {% if flows %}
-    {% for f in flows %}
-    <div style="border-bottom: 1px solid var(--card-border); padding: 16px 0;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h3>{{ f.flow.name }} <span class="badge badge-{{ f.result.status }}">{{ f.result.status }}</span></h3>
-        <div>
-          <span style="color: var(--text-muted); font-size: 13px;">Attempts: {{ f.result.attempts }} | Duration: {{ f.result.duration_ms }}ms</span>
-          {% if f.result.trace_path %}
-            <a href="/artifacts/{{ f.result.trace_path | basename }}" download style="margin-left: 12px; color: var(--primary);">Download Trace (.zip)</a>
-          {% endif %}
-        </div>
-      </div>
+<!-- ── Error pages first ─────────────────────────────────────────────── -->
+{% if error_pages %}
+<div class="card" role="region" aria-label="Error pages">
+  <h2 class="card-title" style="color:var(--red);">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:middle;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    Error Pages ({{ error_pages | length }})
+  </h2>
 
-      <div style="margin-top: 12px;">
-        <h4>Steps</h4>
-        {% for s in f.steps %}
-        <div class="step-card {{ s.status }}">
-          <div style="display: flex; justify-content: space-between;">
-            <strong>Step {{ s.step_index }}: {{ s.description }}</strong>
-            <span class="badge badge-{{ s.status }}">{{ s.status }} ({{ s.duration_ms }}ms)</span>
-          </div>
-          {% if s.error_message %}
-            <div class="error-text">{{ s.error_message }}</div>
-          {% endif %}
-          {% if s.screenshot_path %}
-            <div style="margin-top: 10px;">
-              <strong>Screenshot on failure:</strong>
-              <img src="/artifacts/{{ s.screenshot_path | basename }}" alt="Step failure screenshot" class="screenshot-preview">
-            </div>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
+  {% for page in error_pages %}
+  <div class="page-row has-errors" id="page-err-{{ loop.index }}">
+    <div class="page-row-header" onclick="togglePageRow(this.parentElement)" aria-expanded="false" role="button" tabindex="0"
+         onkeydown="if(event.key==='Enter'||event.key===' ')togglePageRow(this.parentElement)">
+      <span class="badge badge-failed" style="flex-shrink:0;">HTTP {{ page.status_code or 'ERR' }}</span>
+      <span class="page-url" title="{{ page.url }}">{{ page.url }}</span>
+      {% if page.load_ms %}
+        <span style="font-size:12px;color:var(--text-faint);white-space:nowrap;">{{ page.load_ms | int }}ms</span>
+      {% endif %}
+      <button type="button" class="btn btn-ghost btn-sm copy-issue-btn no-print"
+              title="Copy issue text"
+              onclick="event.stopPropagation(); copyIssue('{{ page.url | e }}', {{ page.status_code or 0 }}, this)">
+        Copy
+      </button>
+      <span class="page-row-chevron" aria-hidden="true">▼</span>
+    </div>
 
-      {% if f.console_logs %}
-      <div style="margin-top: 12px;">
-        <h4>Console Errors</h4>
-        {% for cl in f.console_logs %}
-        <div class="log-entry" style="color: #fca5a5;">
-          [{{ cl.timestamp }}] {{ cl.message }} (URL: {{ cl.page_url }})
-        </div>
-        {% endfor %}
-      </div>
+    <div class="page-row-body">
+      {% if page.error %}
+        <div class="error-text">{{ page.error }}</div>
       {% endif %}
 
-      {% if f.network_failures %}
-      <div style="margin-top: 12px;">
-        <h4>Network Failures (>=400)</h4>
-        {% for nf in f.network_failures %}
-        <div class="log-entry" style="color: #fca5a5;">
-          [{{ nf.timestamp }}] HTTP {{ nf.status_code }} {{ nf.method }} {{ nf.url }}
-        </div>
-        {% endfor %}
-      </div>
+      {% if page.screenshot_path %}
+        <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);margin:var(--sp-4) 0 var(--sp-2);text-transform:uppercase;letter-spacing:.04em;">Screenshot</h4>
+        <img src="/artifacts/{{ page.screenshot_path | basename }}" alt="Screenshot of {{ page.url }}" class="screenshot-preview" loading="lazy">
       {% endif %}
     </div>
-    {% endfor %}
-  {% else %}
-    <p style="color: var(--text-muted);">No flows executed in this run (e.g. session was expired).</p>
-  {% endif %}
-</div>
-
-{% if link_checks %}
-<div class="card">
-  <h2>Link Check Results</h2>
-  <p style="color: var(--text-muted); margin-bottom: 12px;">
-    Checked {{ link_checks | length }} internal link(s).
-    {% if broken_links %}
-      <strong style="color: var(--status-fail);">{{ broken_links | length }} broken.</strong>
-    {% else %}
-      <strong style="color: var(--status-pass);">All OK.</strong>
-    {% endif %}
-  </p>
-  <table>
-    <thead>
-      <tr>
-        <th>Target URL</th>
-        <th>Status</th>
-        <th>OK</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for lc in link_checks %}
-      {% set row_bg = "background: rgba(239,68,68,0.07);" if not lc.ok else "" %}
-      {% set lc_badge = "badge-passed" if lc.ok else "badge-failed" %}
-      {% set lc_code = lc.status_code if lc.status_code else "ERR" %}
-      <tr style="{{ row_bg }}">
-        <td style="font-family: monospace; font-size: 13px; word-break: break-all;">{{ lc.target_url }}</td>
-        <td>
-          <span class="badge {{ lc_badge }}">{{ lc_code }}</span>
-        </td>
-        <td>{% if lc.ok %}✓{% else %}✗{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
+
+<!-- ── V1 Flow Results (company runs) ───────────────────────────────── -->
+{% if flows %}
+<div class="card" role="region" aria-label="Flow results">
+  <h2 class="card-title">Flow Results</h2>
+  {% for f in flows %}
+  <div style="border-bottom:1px solid var(--border);padding:var(--sp-5) 0;" {% if loop.last %}style="border:none;"{% endif %}>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--sp-3);">
+      <h3 style="font-size:16px;font-weight:600;">{{ f.flow.name }} <span class="badge badge-{{ f.result.status }}">{{ f.result.status }}</span></h3>
+      <div style="display:flex;align-items:center;gap:var(--sp-4);">
+        <span style="color:var(--text-faint);font-size:13px;">{{ f.result.attempts }} attempt(s) · {{ f.result.duration_ms }}ms</span>
+        {% if f.result.trace_path %}
+          <a href="/artifacts/{{ f.result.trace_path | basename }}" download class="btn btn-ghost btn-sm">Download Trace</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="margin-top:var(--sp-4);">
+      {% for s in f.steps %}
+      <div class="step-card {{ s.status }}">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="font-size:14px;">Step {{ s.step_index }}: {{ s.description }}</strong>
+          <span class="badge badge-{{ s.status }}">{{ s.status }} · {{ s.duration_ms }}ms</span>
+        </div>
+        {% if s.error_message %}<div class="error-text">{{ s.error_message }}</div>{% endif %}
+        {% if s.screenshot_path %}
+          <div style="margin-top:var(--sp-3);">
+            <img src="/artifacts/{{ s.screenshot_path | basename }}" alt="Failure screenshot for step {{ s.step_index }}" class="screenshot-preview" loading="lazy">
+          </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if f.console_logs %}
+      <div style="margin-top:var(--sp-3);">
+        <p style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:var(--sp-2);">Console Errors:</p>
+        {% for cl in f.console_logs %}<div class="log-entry">[{{ cl.timestamp }}] {{ cl.message }}</div>{% endfor %}
+      </div>
+    {% endif %}
+    {% if f.network_failures %}
+      <div style="margin-top:var(--sp-3);">
+        <p style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:var(--sp-2);">Network Failures:</p>
+        {% for nf in f.network_failures %}<div class="log-entry">HTTP {{ nf.status_code }} {{ nf.method }} {{ nf.url }}</div>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- ── Link check results ─────────────────────────────────────────────── -->
+{% if link_checks %}
+<div class="card" role="region" aria-label="Link check results">
+  <h2 class="card-title">
+    Link Checks
+    <span style="font-size:14px;font-weight:400;color:var(--text-muted);margin-left:var(--sp-3);">
+      {{ link_checks | length }} checked ·
+      {% if broken_links %}<span style="color:var(--red);">{{ broken_links | length }} broken</span>{% else %}<span style="color:var(--green);">all OK</span>{% endif %}
+    </span>
+  </h2>
+
+  {% if broken_links %}
+  <div class="table-wrap" style="margin-bottom:var(--sp-4);">
+    <table aria-label="Broken links">
+      <thead><tr>
+        <th scope="col">URL</th>
+        <th scope="col">Status</th>
+      </tr></thead>
+      <tbody>
+        {% for lc in broken_links %}
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:13px;word-break:break-all;">{{ lc.target_url }}</td>
+          <td><span class="badge badge-failed">{{ lc.status_code or 'ERR' }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Collapsible OK links -->
+  {% set ok_links = link_checks | selectattr('ok') | list %}
+  {% if ok_links %}
+  <button type="button" class="ok-pages-toggle" id="ok-links-toggle" onclick="toggleOkLinks()" aria-expanded="false">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+    Show {{ ok_links | length }} OK link(s)
+  </button>
+  <div class="ok-pages-list" id="ok-links-list">
+    <div class="table-wrap">
+      <table aria-label="OK links">
+        <thead><tr><th scope="col">URL</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          {% for lc in ok_links %}
+          <tr>
+            <td style="font-family:var(--font-mono);font-size:13px;word-break:break-all;">{{ lc.target_url }}</td>
+            <td><span class="badge badge-passed">{{ lc.status_code or 'OK' }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ── OK pages (collapsible) ─────────────────────────────────────────── -->
+{% if ok_pages %}
+<button type="button" class="ok-pages-toggle" id="ok-pages-toggle" onclick="toggleOkPages()" aria-expanded="false">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+  Show {{ ok_pages | length }} OK page(s)
+</button>
+<div class="ok-pages-list" id="ok-pages-list">
+  <div class="card" style="margin-top:var(--sp-3);">
+    {% for page in ok_pages %}
+    <div style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3) 0;border-bottom:1px solid rgba(51,65,85,0.4);" {% if loop.last %}style="border:none;"{% endif %}>
+      <span class="badge badge-passed">{{ page.status_code or 'OK' }}</span>
+      <span style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ page.url }}</span>
+      {% if page.load_ms %}<span style="font-size:12px;color:var(--text-faint);white-space:nowrap;margin-left:auto;">{{ page.load_ms | int }}ms</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── No data ─────────────────────────────────────────────────────────── -->
+{% if not pages and not flows and not link_checks %}
+<div class="empty-state">
+  <div class="empty-icon" aria-hidden="true">📭</div>
+  <h2 class="empty-title">No data for this run</h2>
+  <p class="empty-sub">The run may have expired (CAPTCHA/MFA detected) or failed before collecting results.</p>
+  <a href="/sites" class="btn btn-primary">Try again →</a>
+</div>
+{% endif %}
+
+<script>
+function togglePageRow(row) {
+  row.classList.toggle('open');
+  var hdr = row.querySelector('.page-row-header');
+  if (hdr) hdr.setAttribute('aria-expanded', row.classList.contains('open'));
+}
+
+function toggleOkLinks() {
+  var list = document.getElementById('ok-links-list');
+  var btn  = document.getElementById('ok-links-toggle');
+  if (!list) return;
+  list.classList.toggle('open');
+  btn.setAttribute('aria-expanded', list.classList.contains('open'));
+  btn.querySelector('svg').style.transform = list.classList.contains('open') ? 'rotate(180deg)' : '';
+}
+
+function toggleOkPages() {
+  var list = document.getElementById('ok-pages-list');
+  var btn  = document.getElementById('ok-pages-toggle');
+  if (!list) return;
+  list.classList.toggle('open');
+  btn.setAttribute('aria-expanded', list.classList.contains('open'));
+  btn.querySelector('svg').style.transform = list.classList.contains('open') ? 'rotate(180deg)' : '';
+}
+
+function copyIssue(url, status, btn) {
+  var text = 'URL: ' + url + '\nStatus: ' + (status || 'Unknown') + '\nFound by AutoQA Run #{{ run.id }}';
+  navigator.clipboard.writeText(text).then(function () {
+    var orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(function () { btn.textContent = orig; }, 2000);
+  });
+}
+</script>
+
 {% endblock %}

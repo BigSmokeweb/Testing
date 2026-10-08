@@ -5,3 +5,10 @@ config.yaml
 *.db
 __pycache__/
 .env
+
+# Docker / deploy
+security.log
+*.log
+.env
+caddy_data/
+caddy_config/

@@ -1,0 +1,37 @@
+# ── AutoQA Worker Service ──────────────────────────────────────────────────────
+# Based on official Playwright Python image — includes Chromium and all deps
+# Non-root user, runs the RQ worker
+FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
+
+# Non-root user (playwright image already has "pwuser"; create dedicated one)
+RUN groupadd -r autoqa && useradd -r -g autoqa -d /app -s /sbin/nologin autoqa
+
+WORKDIR /app
+
+# Install Python deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers as root (required), then change ownership
+RUN playwright install chromium --with-deps
+
+# Copy source
+COPY alembic/ ./alembic/
+COPY alembic.ini .
+COPY app/ ./app/
+COPY flows/ ./flows/
+COPY config.example.yaml ./config.yaml
+
+# Create writable artifact and auth dirs
+RUN mkdir -p /app/artifacts /app/auth && \
+    chown -R autoqa:autoqa /app
+
+USER autoqa
+
+# The worker must NOT have access to the host network private ranges.
+# Network isolation is enforced at docker-compose / iptables level (see README).
+
+HEALTHCHECK --interval=60s --timeout=15s --start-period=30s --retries=3 \
+    CMD python -c "import redis, os; r=redis.from_url(os.environ['REDIS_URL']); r.ping()" || exit 1
+
+CMD ["sh", "-c", "python -m rq.cli worker --url \"${REDIS_URL}\" autoqa_runs"]

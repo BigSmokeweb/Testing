@@ -1,83 +1,177 @@
 {% extends "base.html" %}
-{% block title %}My Sites - AutoQA{% endblock %}
+{% block title %}My Sites — AutoQA{% endblock %}
+{% block meta_desc %}Manage your verified sites and start automated quality tests.{% endblock %}
 
 {% block content %}
-<div style="max-width: 800px; margin: 30px auto;">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-    <h1 style="font-size: 24px; font-weight: 700; color: var(--text-main); margin: 0;">My Sites</h1>
-    <span style="font-size: 14px; color: var(--text-muted);">Limit: {{ sites|length }}/2 sites</span>
-  </div>
 
-  {% if error %}
-  <div style="background-color: rgba(239,68,68,0.15); border: 1px solid var(--status-fail); color: #fca5a5; padding: 12px; border-radius: 6px; font-size: 14px; margin-bottom: 16px;">
-    {{ error }}
+<!-- Page header -->
+<div class="page-header">
+  <div>
+    <h1 class="page-title">My Sites</h1>
+    <p class="page-subtitle">{{ sites|length }}/2 sites used — verify ownership to run automated tests</p>
   </div>
-  {% endif %}
-
-  {% if success %}
-  <div style="background-color: rgba(34,197,94,0.15); border: 1px solid var(--status-pass); color: #86efac; padding: 12px; border-radius: 6px; font-size: 14px; margin-bottom: 16px;">
-    {{ success }}
-  </div>
-  {% endif %}
-
   {% if sites|length < 2 %}
-  <div class="card" style="margin-bottom: 24px;">
-    <h2 style="font-size: 18px; margin-top: 0; margin-bottom: 12px; color: var(--text-main);">Add New Site</h2>
-    <form method="POST" action="/sites">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div style="display: flex; gap: 12px;">
-        <input type="text" name="url" placeholder="https://example.com" required style="flex: 1; padding: 10px 12px; background: var(--bg-color); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 6px; font-size: 14px;">
-        <button type="submit" style="background: var(--primary); color: #0f172a; padding: 10px 18px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Add Site</button>
-      </div>
-    </form>
-  </div>
+    <a href="/wizard" class="btn btn-primary">+ Add Site</a>
   {% endif %}
+</div>
 
+<!-- Flash messages -->
+{% if error %}
+<div class="alert alert-error" role="alert" aria-live="assertive">
+  <span class="alert-icon" aria-hidden="true">⚠</span>{{ error }}
+</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success" role="alert" aria-live="polite">
+  <span class="alert-icon" aria-hidden="true">✓</span>{{ success }}
+</div>
+{% endif %}
+
+<!-- Add site inline form (only when under limit and not using wizard) -->
+{% if sites|length < 2 %}
+<div class="card" style="margin-bottom:var(--sp-6);">
+  <h2 class="card-title" style="font-size:16px;">Quick Add</h2>
+  <form method="POST" action="/sites" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div style="display:flex;gap:var(--sp-3);">
+      <label for="quick-add-url" class="sr-only">Website URL</label>
+      <input type="text" id="quick-add-url" name="url" placeholder="https://example.com" required class="form-input" style="flex:1;">
+      <button type="submit" class="btn btn-primary" id="quick-add-btn" onclick="this.classList.add('loading')">Add Site</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<!-- Sites list -->
+{% if sites %}
   {% for site in sites %}
-  <div class="card" style="margin-bottom: 20px; border-left: 4px solid {% if site.verified_at %}var(--status-pass){% else %}var(--status-flaky){% endif %};">
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-      <div>
-        <h3 style="margin: 0 0 4px 0; font-size: 18px; color: var(--text-main);">{{ site.domain }}</h3>
-        <span style="font-size: 13px; color: var(--text-muted);">{{ site.url }}</span>
+  <div class="site-card" style="border-left:4px solid {% if site.verified_at %}var(--green){% else %}var(--amber){% endif %};">
+    <div class="site-card-header">
+      <div style="flex:1;min-width:0;">
+        <div class="site-domain">{{ site.domain }}</div>
+        <div class="site-url-label">{{ site.url }}</div>
       </div>
       <div>
         {% if site.verified_at %}
-          <span class="badge badge-passed" style="font-size: 13px; padding: 4px 8px;">✓ Verified</span>
+          <span class="badge badge-verified">✓ Verified</span>
         {% else %}
-          <span class="badge" style="font-size: 13px; padding: 4px 8px; background: rgba(245,158,11,0.2); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4);">Pending Verification</span>
+          <span class="badge badge-flaky">Pending Verification</span>
         {% endif %}
       </div>
     </div>
 
-    {% if not site.verified_at %}
-    <div style="background: rgba(15,23,42,0.6); border: 1px solid var(--card-border); border-radius: 6px; padding: 16px; margin: 16px 0; font-size: 13px;">
-      <h4 style="margin: 0 0 10px 0; font-size: 14px; color: var(--text-main);">To verify ownership, choose one of these methods:</h4>
-      
-      <p style="margin: 8px 0 4px 0; color: var(--text-muted);"><strong>Method 1: DNS TXT Record</strong></p>
-      <div style="background: #090d16; color: #38bdf8; padding: 10px 14px; border: 1px solid var(--card-border); border-radius: 4px; font-family: monospace; word-break: break-all; line-height: 1.6;">
-        <span style="color: var(--text-muted);">Host:</span> <code style="color: #f8fafc;">_autoqa.{{ site.domain }}</code><br>
-        <span style="color: var(--text-muted);">Value:</span> <code style="color: #38bdf8;">autoqa-verify={{ site.verify_token }}</code>
+    {% if site.verified_at %}
+    <!-- Verified site actions -->
+    <div class="site-actions">
+      <form method="POST" action="/sites/{{ site.id }}/run" style="margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="mode" value="public">
+        <button type="submit" class="btn btn-primary btn-sm" id="run-public-{{ site.id }}" onclick="this.classList.add('loading')">
+          Run Public Test
+        </button>
+      </form>
+
+      <a href="/history" class="btn btn-ghost btn-sm">View History</a>
+
+      <details style="display:inline;">
+        <summary class="btn btn-ghost btn-sm" style="cursor:pointer;list-style:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Mode A Login
+        </summary>
+        <div style="margin-top:var(--sp-4);padding:var(--sp-5);background:rgba(15,23,42,0.5);border:1px solid var(--border);border-radius:var(--r-lg);">
+          <div class="alert alert-info" style="margin-bottom:var(--sp-4);">
+            <span class="alert-icon" aria-hidden="true">🔒</span>
+            Use a <strong>dedicated test account</strong>. Credentials are purged immediately after the run. CAPTCHA, MFA, SSO cannot be automated.
+          </div>
+          <form method="POST" action="/sites/{{ site.id }}/run">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="mode" value="credentials">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3);margin-bottom:var(--sp-3);">
+              <div class="form-group" style="margin:0;">
+                <label for="login-url-{{ site.id }}" class="form-label">Login Page URL</label>
+                <input type="url" id="login-url-{{ site.id }}" name="login_url" placeholder="{{ site.url }}/login" required class="form-input">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label for="cred-user-{{ site.id }}" class="form-label">Username / Email</label>
+                <input type="text" id="cred-user-{{ site.id }}" name="username" placeholder="testuser@example.com" required autocomplete="off" class="form-input">
+              </div>
+            </div>
+            <div style="display:flex;gap:var(--sp-3);align-items:flex-end;">
+              <div class="form-group" style="margin:0;flex:1;">
+                <label for="cred-pw-{{ site.id }}" class="form-label">Password</label>
+                <input type="password" id="cred-pw-{{ site.id }}" name="password" placeholder="••••••••" required autocomplete="new-password" class="form-input">
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm" onclick="this.classList.add('loading')">Run Auth Test</button>
+            </div>
+          </form>
+        </div>
+      </details>
+    </div>
+
+    {% else %}
+    <!-- Unverified site: show verification instructions -->
+    <div style="background:rgba(15,23,42,0.5);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-5);margin-top:var(--sp-4);">
+      <h3 style="font-size:14px;font-weight:600;margin-bottom:var(--sp-4);">Verify ownership to start testing:</h3>
+
+      <div class="verify-card">
+        <div class="verify-card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Method 1 — DNS TXT Record
+        </div>
+        <div class="code-block" style="margin-bottom:var(--sp-2);font-size:12px;">
+          <div><span class="code-key">Name: </span><span class="code-val">_autoqa.{{ site.domain }}</span></div>
+          <div style="margin-top:3px;"><span class="code-key">Value: </span><span class="code-val">autoqa-verify={{ site.verify_token }}</span></div>
+        </div>
       </div>
 
-      <p style="margin: 14px 0 4px 0; color: var(--text-muted);"><strong>Method 2: Hosted Verification File</strong></p>
-      <div style="background: #090d16; color: #38bdf8; padding: 10px 14px; border: 1px solid var(--card-border); border-radius: 4px; font-family: monospace; word-break: break-all; line-height: 1.6;">
-        <span style="color: var(--text-muted);">URL:</span> <code style="color: #f8fafc;">{{ site.url }}/.well-known/autoqa-{{ site.verify_token }}.txt</code><br>
-        <span style="color: var(--text-muted);">Content:</span> <code style="color: #38bdf8;">{{ site.verify_token }}</code>
+      <div class="verify-card">
+        <div class="verify-card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+          Method 2 — Hosted Verification File
+        </div>
+        <div class="code-block" style="margin-bottom:var(--sp-2);font-size:12px;">
+          <div><span class="code-key">Path: </span><span class="code-val">{{ site.url }}/.well-known/autoqa-{{ site.verify_token }}.txt</span></div>
+          <div style="margin-top:3px;"><span class="code-key">Content: </span><span class="code-val">{{ site.verify_token }}</span></div>
+        </div>
       </div>
 
-      <div style="margin-top: 16px;">
-        <form method="POST" action="/sites/{{ site.id }}/verify" style="display: inline;">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" style="background: var(--status-pass); color: #052e16; padding: 8px 16px; border: none; border-radius: 6px; font-weight: 700; cursor: pointer;">Verify now</button>
-        </form>
-      </div>
+      <form method="POST" action="/sites/{{ site.id }}/verify">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn btn-success btn-sm" id="verify-site-{{ site.id }}" onclick="this.classList.add('loading')">
+          Verify Now →
+        </button>
+      </form>
     </div>
     {% endif %}
   </div>
-  {% else %}
-  <div class="card" style="text-align: center; padding: 40px; color: #64748b;">
-    <p style="margin-bottom: 0;">You have not added any sites yet. Enter a website URL above to verify ownership and run automated tests.</p>
-  </div>
   {% endfor %}
+
+{% else %}
+<!-- Empty state -->
+<div class="empty-state">
+  <div class="empty-icon" aria-hidden="true">🌐</div>
+  <h2 class="empty-title">No sites added yet</h2>
+  <p class="empty-sub">Add a website URL, verify ownership, and kick off your first automated test report.</p>
+  <a href="/wizard" class="btn btn-primary">Add Your First Site →</a>
 </div>
+{% endif %}
+
+<!-- Danger zone -->
+<div class="danger-zone" role="region" aria-labelledby="danger-title">
+  <div class="danger-zone-title" id="danger-title">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    Danger Zone
+  </div>
+  <p style="font-size:14px;color:var(--text-muted);margin-bottom:var(--sp-4);">
+    Permanently delete your account along with all sites, test runs, and screenshot artifacts. This cannot be undone.
+  </p>
+  <form method="POST" action="/account/delete"
+        onsubmit="return confirm('Permanently delete your account and ALL data? This cannot be undone.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-danger btn-sm" id="delete-account-btn">
+      Delete My Account
+    </button>
+  </form>
+</div>
+
 {% endblock %}
