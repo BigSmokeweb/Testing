@@ -47,6 +47,7 @@ from app.auth import (
     hash_password,
     verify_password,
     normalize_and_validate_email,
+    invalidate_session,
 )
 
 limiter = Limiter(key_func=get_remote_address)
@@ -177,6 +178,8 @@ templates.env.filters["tojson"] = tojson_filter
 @app.on_event("startup")
 def on_startup():
     init_db()
+    from app.creds import get_fernet
+    get_fernet()
 
 
 def get_current_user(request: Request):
@@ -187,6 +190,9 @@ def get_current_user(request: Request):
 def get_or_create_csrf(request: Request) -> str:
     token = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
     return generate_csrf_token(token)
+
+
+templates.env.globals["get_csrf_token"] = get_or_create_csrf
 
 
 def is_authenticated(request: Request) -> bool:
@@ -295,7 +301,7 @@ async def register_submit(request: Request):
         session.refresh(new_user)
         user_id = new_user.id
 
-    token = create_session_token(user_id)
+    token = create_session_token(user_id, session_version=new_user.session_version)
     next_url = request.query_params.get("next") or "/"
     response = RedirectResponse(url=next_url, status_code=303)
     _secure = os.getenv("LOCAL_MODE", "0") != "1"
@@ -377,7 +383,7 @@ async def login_submit(request: Request):
         user_id = user.id
 
 
-    token = create_session_token(user_id)
+    token = create_session_token(user_id, session_version=user.session_version)
     next_url = request.query_params.get("next") or "/"
     response = RedirectResponse(url=next_url, status_code=303)
     _secure = os.getenv("LOCAL_MODE", "0") != "1"
@@ -391,8 +397,44 @@ async def login_submit(request: Request):
     return response
 
 
-@app.get("/logout")
-def logout(request: Request):
+@app.get("/logout", response_class=HTMLResponse)
+def logout_confirm_page(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    csrf_token = get_or_create_csrf(request)
+    return HTMLResponse(
+        content=f"""<!DOCTYPE html>
+<html>
+<head><title>Confirm Logout</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d1117;color:#c9d1d9;">
+  <div style="background:#161b22;padding:2rem;border-radius:8px;border:1px solid #30363d;max-width:400px;text-align:center;">
+    <h2 style="margin-top:0;color:#f0f6fc;">Confirm Logout</h2>
+    <p style="color:#8b949e;margin-bottom:1.5rem;">Are you sure you want to log out of {user.email}?</p>
+    <form method="POST" action="/logout">
+      <input type="hidden" name="csrf_token" value="{csrf_token}">
+      <button type="submit" style="background:#da3633;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;margin-right:8px;">Log out</button>
+      <a href="/sites" style="color:#58a6ff;text-decoration:none;font-size:14px;">Cancel</a>
+    </form>
+  </div>
+</body>
+</html>"""
+    )
+
+
+@app.post("/logout")
+async def logout_submit(request: Request):
+    body = await request.body()
+    parsed = parse_qs(body.decode("utf-8"))
+    csrf = parsed.get("csrf_token", [""])[0]
+
+    session_tok = request.cookies.get(SESSION_COOKIE_NAME) or "anon"
+    if not verify_csrf_token(csrf, session_tok):
+        return HTMLResponse(content="Invalid CSRF token", status_code=400)
+
+    user = get_current_user(request)
+    if user:
+        invalidate_session(user.id)
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE_NAME)
     return response

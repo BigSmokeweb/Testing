@@ -30,7 +30,10 @@
     <div class="nav-user">
       {% if user %}
         <span class="nav-email" title="{{ user.email }}">{{ user.email }}</span>
-        <a href="/logout" class="nav-btn nav-btn-ghost">Logout</a>
+        <form method="POST" action="/logout" style="display:inline;margin:0;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token if csrf_token else get_csrf_token(request) }}">
+          <button type="submit" class="nav-btn nav-btn-ghost" style="background:transparent;border:1px solid var(--border,#30363d);cursor:pointer;">Logout</button>
+        </form>
       {% else %}
         <a href="/login" class="nav-btn nav-btn-ghost">Log in</a>
         <a href="/register" class="nav-btn">Get started →</a>
