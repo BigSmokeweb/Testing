@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 import redis
 from rq import Worker, Queue
-from sqlmodel import Session
+from sqlmodel import Session, select
 from app.models import Run, engine
 from app.public_checks import run_public_checks
 
@@ -52,12 +52,39 @@ def run_job_entry(run_id: int):
 
 
 
+def reap_stuck_runs(timeout_minutes: int = 10) -> int:
+    """
+    Reaps runs stuck in 'running' for more than timeout_minutes (10 min).
+    Marks them as 'failed' with finished_at timestamp.
+    """
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+    cutoff_iso = cutoff.isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    reaped = 0
+
+    with Session(engine) as session:
+        stuck_runs = session.exec(
+            select(Run).where(Run.status == "running", Run.started_at < cutoff_iso)
+        ).all()
+        for r in stuck_runs:
+            r.status = "failed"
+            r.finished_at = now_iso
+            session.add(r)
+            reaped += 1
+        if reaped:
+            session.commit()
+    return reaped
+
+
 def run_retention_cleanup(retention_days: int = 30) -> int:
     """
     Retention cleanup job:
+    - Reaps stuck runs
     - Deletes expired credentials
     - Deletes runs and associated pages, links, and disk artifacts older than retention_days (or RETENTION_DAYS env)
     """
+    reap_stuck_runs(timeout_minutes=10)
     import shutil
     from pathlib import Path
     from datetime import timedelta
@@ -125,6 +152,12 @@ def run_retention_cleanup(retention_days: int = 30) -> int:
 
 
 def start_worker():
+    from app.creds import cleanup_expired_credentials
+    # 1. Purge expired credentials on worker start
+    cleanup_expired_credentials()
+    # 2. Reap any stuck runs from prior crashes
+    reap_stuck_runs(timeout_minutes=10)
+
     conn = redis.from_url(REDIS_URL)
     q = Queue(QUEUE_NAME, connection=conn)
     worker = Worker([q], connection=conn)
