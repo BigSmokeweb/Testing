@@ -329,9 +329,10 @@ def run_public_checks(run_id: int) -> None:
                     if is_ok:
                         ok_pages_count += 1
 
-                    # Screenshots: Always on error
+                    # Screenshots: on HTTP error, exception error, console errors, or first page
+                    has_errors = (not is_ok) or (len(collector.console_errors) > 0)
                     try:
-                        if not is_ok or crawled_pages_count == 1:
+                        if has_errors or crawled_pages_count == 1:
                             shot_filename = f"page_{crawled_pages_count}_{int(time.time()*1000)}.png"
                             shot_path = run_artifacts_dir / shot_filename
                             page.screenshot(path=str(shot_path), full_page=False)
