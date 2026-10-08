@@ -298,12 +298,13 @@ async def register_submit(request: Request):
     token = create_session_token(user_id)
     next_url = request.query_params.get("next") or "/"
     response = RedirectResponse(url=next_url, status_code=303)
+    _secure = os.getenv("LOCAL_MODE", "0") != "1"
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=_secure,
     )
     return response
 
@@ -379,12 +380,13 @@ async def login_submit(request: Request):
     token = create_session_token(user_id)
     next_url = request.query_params.get("next") or "/"
     response = RedirectResponse(url=next_url, status_code=303)
+    _secure = os.getenv("LOCAL_MODE", "0") != "1"
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=_secure,
     )
     return response
 
@@ -400,11 +402,15 @@ def logout(request: Request):
 def home(request: Request):
     user = get_current_user(request)
     config = load_config()
-    session_valid = is_session_valid()
     csrf_token = get_or_create_csrf(request)
+    local_mode = os.getenv("LOCAL_MODE", "0") == "1"
 
-    with Session(db_engine) as session:
-        latest_run = session.exec(select(Run).order_by(Run.id.desc())).first()
+    session_valid = False
+    latest_run = None
+    if local_mode:
+        session_valid = is_session_valid()
+        with Session(db_engine) as session:
+            latest_run = session.exec(select(Run).order_by(Run.id.desc())).first()
 
     return templates.TemplateResponse(
         request=request,
