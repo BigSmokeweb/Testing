@@ -5,11 +5,14 @@ from cryptography.fernet import Fernet
 from sqlmodel import Session, select
 from app.models import SiteCredential, engine
 
-DEFAULT_DEV_KEY = "ffHyO8bP0IdwkhA2f5XVHH-wWigpQ5q1ObMPbqUh-TA="
-
-
 def get_fernet() -> Fernet:
-    key = os.getenv("FERNET_KEY") or DEFAULT_DEV_KEY
+    key = os.getenv("FERNET_KEY")
+    if not key:
+        if os.getenv("LOCAL_MODE", "0") == "1":
+            # Temporary in-memory key for local test/dev mode only
+            key = "ffHyO8bP0IdwkhA2f5XVHH-wWigpQ5q1ObMPbqUh-TA="
+        else:
+            raise RuntimeError("FERNET_KEY environment variable is required in production.")
     if isinstance(key, str):
         key_bytes = key.encode("utf-8")
     else:
