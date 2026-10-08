@@ -58,8 +58,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
-    ports:
-      - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-autoqa}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-autoqa}
       REDIS_URL:    redis://redis:6379/0
