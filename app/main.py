@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import threading
+from typing import Optional, Tuple
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
@@ -138,6 +139,19 @@ def is_authenticated(request: Request) -> bool:
     if os.getenv("LOCAL_MODE", "0") == "1":
         return True
     return get_current_user(request) is not None
+
+
+def verify_run_ownership(run: Optional[Run], user: Optional[User]) -> bool:
+    """
+    Returns True if user is authorized to access the given run.
+    LOCAL_MODE=1 grants access.
+    Otherwise: requires authenticated user and matching run.user_id (NULL is denied).
+    """
+    if os.getenv("LOCAL_MODE", "0") == "1":
+        return True
+    if not run or not user or not run.user_id:
+        return False
+    return run.user_id == user.id
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -388,7 +402,10 @@ def history(request: Request):
 
     user = get_current_user(request)
     with Session(db_engine) as session:
-        runs = session.exec(select(Run).order_by(Run.id.desc())).all()
+        if os.getenv("LOCAL_MODE", "0") == "1":
+            runs = session.exec(select(Run).order_by(Run.id.desc())).all()
+        else:
+            runs = session.exec(select(Run).where(Run.user_id == user.id).order_by(Run.id.desc())).all()
         run_data = []
         for r in runs:
             flow_results = session.exec(
@@ -432,7 +449,7 @@ def report(request: Request, run_id: int):
     user = get_current_user(request)
     with Session(db_engine) as session:
         run = session.get(Run, run_id)
-        if not run:
+        if not run or not verify_run_ownership(run, user):
             return HTMLResponse(content="Run not found", status_code=404)
 
         flow_results = session.exec(
@@ -835,9 +852,7 @@ def run_progress_page(request: Request, run_id: int):
 
     with Session(db_engine) as session:
         run = session.get(Run, run_id)
-        if not run:
-            return RedirectResponse(url="/history", status_code=303)
-        if user and run.user_id and run.user_id != user.id:
+        if not run or not verify_run_ownership(run, user):
             return RedirectResponse(url="/history", status_code=303)
 
         # If already done, redirect to report
@@ -859,10 +874,8 @@ def get_run_status(request: Request, run_id: int):
 
     with Session(db_engine) as session:
         run = session.get(Run, run_id)
-        if not run:
+        if not run or not verify_run_ownership(run, user):
             return JSONResponse({"error": "Not found"}, status_code=404)
-        if user and run.user_id and run.user_id != user.id:
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
 
         # Count pages checked so far
         from app.models import Page as PageModel
