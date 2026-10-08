@@ -74,12 +74,17 @@
 
 ---
 
-## 4. Accepted Risks
+## 4. Accepted Risks & Architectural Decisions
 
 1. **F21 — DNS Rebinding**:
    - `safe_http_fetch()` resolves hostname once and verifies that IP is public. A malicious DNS server returning a short TTL and swapping to private IP (127.0.0.1 or 169.254.169.254) between resolve and connect is mitigated at the network layer on Linux hosts via `scripts/block_worker_internal.sh` (`iptables -I DOCKER-USER`).
 2. **F15 — Slack Webhook SSRF**:
    - Slack webhook is read from static `config.yaml` or environment. Tenants cannot edit `config.yaml` at runtime.
+3. **Timestamp Schema Decision (Option A)**:
+   - Timestamps (`started_at`, `finished_at`, `queued_at`) remain ISO 8601 UTC text (`VARCHAR`) for launch. Lexicographical comparisons (`started_at < cutoff_iso`) work identically on SQLite and PostgreSQL. Migrating to native `TIMESTAMP WITH TIME ZONE` and nullable `finished_at` is deferred as post-launch technical debt.
+4. **Queued Runs Reaper (F13 extension)**:
+   - Extended `reap_stuck_runs()` to reap runs stuck in `status='queued'` for >15 minutes (note: `"Job was never picked up"`). Prevents worker/Redis crashes from permanently consuming a tenant's concurrent run slot.
+   - Workers verify `run.status == 'queued'` before starting execution; reaped runs are skipped cleanly.
 
 ---
 
@@ -100,16 +105,18 @@
 
 ## 6. Manual To-Dos for Project Owner
 
-1. **Review Legal Text**:
+1. **Do NOT Copy Dev PostgreSQL to Production**:
+   - The local compose database volume (`postgres_data`) contains development seed users, test runs, and test fixtures. Start with a fresh, clean PostgreSQL database in production and let Alembic apply migrations (`alembic upgrade head`).
+2. **Review Legal Text**:
    - Check `/terms` and `/privacy` copy in `base.html` or replace with your legal counsel's approved terms.
-2. **Set Production Environment Secrets**:
+3. **Set Production Environment Secrets**:
    - Generate strong values for `.env`:
      - `SECRET_KEY`: `openssl rand -hex 32`
      - `FERNET_KEY`: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
      - `POSTGRES_PASSWORD`: Strong random secret
-3. **Database Backups**:
+4. **Database Backups**:
    - Set up daily automated `pg_dump` backups for the `postgres_data` volume.
-4. **Pre-Launch VPS Checklist**:
+5. **Pre-Launch VPS Checklist**:
    - Execute `bash scripts/block_worker_internal.sh` on Linux VPS host to lock down worker egress to private LAN.
    - Verify DNS points `DOMAIN` to VPS IP and ports 80/443 are open in cloud security group.
    - Ensure `LOCAL_MODE=0` in `.env`.
