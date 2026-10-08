@@ -429,6 +429,9 @@ def _run_suite_and_linkcheck(engine: str) -> None:
 
 @app.post("/run")
 async def trigger_run(request: Request):
+    if os.getenv("LOCAL_MODE", "0") != "1":
+        return HTMLResponse("Not Found", status_code=404)
+
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
 
