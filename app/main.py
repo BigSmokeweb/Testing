@@ -48,7 +48,13 @@ from app.auth import (
 )
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="AutoQA Dashboard")
+_is_local = os.getenv("LOCAL_MODE", "0") == "1"
+app = FastAPI(
+    title="AutoQA Dashboard",
+    docs_url="/docs" if _is_local else None,
+    redoc_url="/redoc" if _is_local else None,
+    openapi_url="/openapi.json" if _is_local else None,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
