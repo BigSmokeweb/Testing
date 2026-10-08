@@ -132,3 +132,22 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+  # ── Cleanup Service (hourly retention & credential reaper) ──────────────────
+  cleanup:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-autoqa}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-autoqa}
+      FERNET_KEY:   ${FERNET_KEY:?err}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+    volumes:
+      - artifacts_data:/app/artifacts
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "while true; do python -c 'from app.worker import run_retention_cleanup; run_retention_cleanup()'; sleep 3600; done"]
