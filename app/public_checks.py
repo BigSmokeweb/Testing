@@ -11,10 +11,14 @@ import requests
 from playwright.sync_api import sync_playwright
 from sqlmodel import Session, select
 
+import logging as _logging
+
 from app.creds import delete_credentials, get_credentials
-from app.models import ConsoleLog, FlowResultModel, LinkCheck, NetworkFailure, Page, Run, Site, engine
+from app.models import ConsoleLog, FlowResultModel, LinkCheck, NetworkFailure, Page, Run, Site, User, engine
 from app.monitors import MonitorCollector, attach, record_load_time
 from app.safety import install_request_guard, validate_url, safe_http_fetch
+
+_worker_logger = _logging.getLogger("autoqa_worker")
 
 MAX_PAGES = 25
 MAX_DEPTH = 2
@@ -170,17 +174,10 @@ def attempt_login(page, login_url: str, username: str, password: str, base_domai
 
 def run_public_checks(run_id: int) -> None:
     """
-    Step 5 & 6 Checks Engine:
-    - Supports Mode B (public crawl) and Mode A (test-credentials login)
-    - Mode A: attempts login, detects CAPTCHA/MFA/SSO and marks expired if not automatable
-    - Deletes credentials when run ends (try / finally)
-    - Never logs credentials, masks passwords, no screenshots with typed credentials
-    - Crawls verified site starting at its URL:
-        * same domain only
-        * max 25 pages, depth 2, 5-minute budget
-    - For each page records status, load time, console errors, network failures, screenshot
-    - Collects & checks internal links
-    - Computes score
+    Step 5 & 6 Checks Engine.
+    Worker re-checks admin status server-side from ADMIN_EMAILS env var and
+    the run owner's email stored in the DB.  No request parameter or run.note
+    value can grant elevated limits — the env var is the only source of truth.
     """
     with Session(engine) as session:
         run = session.get(Run, run_id)
@@ -193,6 +190,31 @@ def run_public_checks(run_id: int) -> None:
         start_url = site.url
         base_domain = site.domain
         run_mode = run.mode or "public"
+
+        # Re-check admin status server-side.  Read ADMIN_EMAILS from this
+        # process's own environment and look up the run owner from the DB.
+        run_user = session.get(User, run.user_id) if run.user_id else None
+        from app.admin import is_admin, get_admin_max_pages, get_admin_timeout_seconds, mask_email
+        admin = run_user is not None and is_admin(run_user.email)
+
+    # Apply elevated limits for admin; keep normal limits for everyone else.
+    effective_max_pages = get_admin_max_pages() if admin else MAX_PAGES
+    effective_budget_seconds = get_admin_timeout_seconds() if admin else MAX_BUDGET_SECONDS
+
+    if admin:
+        masked = mask_email(run_user.email) if run_user else "***"
+        _worker_logger.info(
+            "ADMIN_BYPASS run_id=%s user=%s domain=%s pages_cap=%s timeout=%ss",
+            run_id, masked, base_domain, effective_max_pages, effective_budget_seconds,
+        )
+        try:
+            sec = _logging.getLogger("autoqa_security")
+            sec.info(
+                "EVENT=ADMIN_BYPASS_WORKER run_id=%s user=%s domain=%s pages_cap=%s timeout=%ss",
+                run_id, masked, base_domain, effective_max_pages, effective_budget_seconds,
+            )
+        except Exception:
+            pass
 
     start_ts = time.time()
     run_artifacts_dir = ARTIFACTS_DIR / str(run_id)
@@ -262,8 +284,8 @@ def run_public_checks(run_id: int) -> None:
                         finally:
                             login_page.close()
 
-                while queue and (crawled_pages_count < MAX_PAGES):
-                    if (time.time() - start_ts) >= MAX_BUDGET_SECONDS:
+                while queue and (crawled_pages_count < effective_max_pages):
+                    if (time.time() - start_ts) >= effective_budget_seconds:
                         break
 
                     current_url, depth = queue.popleft()

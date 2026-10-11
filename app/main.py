@@ -35,6 +35,7 @@ from app.sites import (
     verify_site_ownership,
 )
 from app.jobs import enqueue_run
+from app.admin import is_admin
 from app.runner import run_suite
 from app.linkcheck import check_links
 from app.session import is_valid as is_session_valid
@@ -180,6 +181,8 @@ def on_startup():
     init_db()
     from app.creds import get_fernet
     get_fernet()
+    from app.admin import warn_unregistered_admin_emails
+    warn_unregistered_admin_emails()
 
 
 def get_current_user(request: Request):
@@ -639,6 +642,14 @@ def report(request: Request, run_id: int):
     load_times = [p.load_ms for p in pages_all if p.load_ms]
     avg_load_ms = (sum(load_times) / len(load_times)) if load_times else None
 
+    # Compute admin label at render time from the run owner's email.
+    # Never read from run.note or any request parameter.
+    is_admin_run = False
+    if run.user_id:
+        with Session(db_engine) as session_admin:
+            run_owner = session_admin.get(User, run.user_id)
+            is_admin_run = run_owner is not None and is_admin(run_owner.email)
+
     return templates.TemplateResponse(
         request=request,
         name="report.html",
@@ -655,6 +666,7 @@ def report(request: Request, run_id: int):
             "link_checks": link_checks,
             "broken_links": broken_links,
             "user": user,
+            "is_admin_run": is_admin_run,
         },
     )
 

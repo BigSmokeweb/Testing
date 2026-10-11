@@ -66,27 +66,52 @@ def run_job_entry(run_id: int):
 def reap_stuck_runs(timeout_minutes: int = 10, queued_timeout_minutes: int = 15) -> int:
     """
     Reaps:
-    - Runs stuck in 'running' for more than timeout_minutes (10 min).
+    - Runs stuck in 'running': normal runs past timeout_minutes (default 10 min),
+      admin runs past their configured admin timeout plus a margin (default 15m + 5m = 20 min).
     - Runs stuck in 'queued' for more than queued_timeout_minutes (15 min).
     Marks them as 'failed' with finished_at timestamp.
     """
     from datetime import timedelta
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
-    cutoff_iso = cutoff.isoformat()
-    queued_cutoff = datetime.now(timezone.utc) - timedelta(minutes=queued_timeout_minutes)
-    queued_cutoff_iso = queued_cutoff.isoformat()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    from app.admin import is_admin, get_admin_timeout_seconds
+    from app.models import User
+
+    now = datetime.now(timezone.utc)
+    normal_cutoff_iso = (now - timedelta(minutes=timeout_minutes)).isoformat()
+    queued_cutoff_iso = (now - timedelta(minutes=queued_timeout_minutes)).isoformat()
+    now_iso = now.isoformat()
+
+    # Admin runs get admin_timeout_seconds + 300s (5-minute margin) converted to minutes
+    admin_timeout_sec = get_admin_timeout_seconds()
+    admin_timeout_margin_min = max(timeout_minutes, int((admin_timeout_sec + 300) / 60))
+    admin_cutoff_iso = (now - timedelta(minutes=admin_timeout_margin_min)).isoformat()
+
     reaped = 0
 
     with Session(engine) as session:
         # 1. Stuck running runs
+        # Select all running runs older than the normal cutoff
         stuck_runs = session.exec(
-            select(Run).where(Run.status == "running", Run.started_at < cutoff_iso)
+            select(Run).where(Run.status == "running", Run.started_at < normal_cutoff_iso)
         ).all()
         for r in stuck_runs:
+            # Check if this run belongs to an admin
+            is_run_admin = False
+            if r.user_id:
+                run_user = session.get(User, r.user_id)
+                if run_user and is_admin(run_user.email):
+                    is_run_admin = True
+
+            # If admin run, only reap if it exceeded the admin cutoff
+            if is_run_admin:
+                if r.started_at >= admin_cutoff_iso:
+                    # Still within allowed admin runtime + margin; do not reap!
+                    continue
+                r.note = f"Worker died or timed out (no response for >{admin_timeout_margin_min} minutes)"
+            else:
+                r.note = f"Worker died or timed out (no response for >{timeout_minutes} minutes)"
+
             r.status = "failed"
             r.finished_at = now_iso
-            r.note = "Worker died or timed out (no response for >10 minutes)"
             session.add(r)
             reaped += 1
 

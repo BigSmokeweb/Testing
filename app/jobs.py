@@ -1,11 +1,14 @@
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 import redis
 from rq import Queue
 from sqlmodel import Session, select
-from app.models import Run, Site, Usage, engine
+from app.models import Run, Site, Usage, User, engine
 from app.safety import validate_url
+
+logger = logging.getLogger("autoqa_jobs")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_NAME = "autoqa_runs"
@@ -51,10 +54,12 @@ def check_concurrency_limits(session: Session, user_id: int, mode: str = "public
     Checks concurrency limits.
     Quick checks (mode='quick') are single-page instant fetches, so they
     bypass the global platform limit but still respect the per-user 1-run limit.
+    Admin runs bypass the per-user limit but NOT the global browser cap
+    (enforced in enqueue_run after this function).
     """
     active_statuses = ["queued", "running"]
 
-    # Global limit only applies to full crawl / credentials runs
+    # Global limit only applies to full crawl / credentials runs (not quick checks)
     if mode != "quick":
         global_active = session.exec(
             select(Run).where(Run.status.in_(active_statuses))
@@ -62,7 +67,7 @@ def check_concurrency_limits(session: Session, user_id: int, mode: str = "public
         if len(global_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
             return False, "Platform is currently busy (global limit reached). Please try again shortly."
 
-    # Per-user 1-run limit always applies (including quick checks)
+    # Per-user 1-run limit (admins bypass this; handled in enqueue_run)
     user_active = session.exec(
         select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
     ).all()
@@ -113,18 +118,54 @@ def check_quick_check_limits(session: Session, user_id: int, site: Site) -> Tupl
     return True, ""
 
 
+def _log_admin_bypass(user_id: int, user_email: str, site_domain: str, limits_skipped: list) -> None:
+    """Write one security-log line per admin bypass. No credentials in the message."""
+    # Import here to avoid circular dependency with main.py
+    try:
+        from app.admin import mask_email
+        masked = mask_email(user_email)
+    except Exception:
+        masked = "***"
+    skipped_str = ", ".join(limits_skipped)
+    logger.info(
+        "ADMIN_BYPASS user_id=%s email=%s domain=%s skipped=[%s]",
+        user_id, masked, site_domain, skipped_str,
+    )
+    # Also write to security.log via the file handler set up in main.py
+    try:
+        import logging as _logging
+        sec = _logging.getLogger("autoqa_security")
+        sec.info(
+            "EVENT=ADMIN_BYPASS user_id=%s email=%s domain=%s skipped=[%s]",
+            user_id, masked, site_domain, skipped_str,
+        )
+    except Exception:
+        pass
+
+
 def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optional[Run], Optional[str]]:
     """
-    Enforces quality limits:
-    - If mode == 'quick':
-      - Site may be unverified (SSRF checks still strictly enforced).
-      - Max 3 quick checks per user per day.
-      - Max 10 quick checks per domain per day across all users.
-      - 1 concurrent run per user.
-    - If mode in ('public', 'credentials'):
-      - Site MUST be verified.
-      - Standard daily quota (Usage table).
+    Enforces quality gates and, for admin users, grants appropriate bypasses.
+
+    Admin detection: looks up User by user_id, calls is_admin(user.email).
+    No caller-supplied flag is accepted — bypass cannot be forged via a
+    request parameter.
+
+    Normal limits:
+      - mode == 'quick':  unverified site allowed; 3/user/day; 10/domain/day; 1 concurrent per user.
+      - mode in ('public', 'credentials'):  site MUST be verified; daily Usage quota.
+
+    Admin bypasses (when is_admin(user.email) is True):
+      - Verification check skipped for any mode.
+      - Daily run quota skipped.
+      - Quick-check user and domain caps skipped.
+      - Per-user concurrent run limit skipped.
+      - Admin still counts toward MAX_CONCURRENT_RUNS_GLOBAL (hard rule).
+
+    SSRF check (validate_url) is NEVER skipped.
     """
+    from app.admin import is_admin
+
     with Session(engine) as session:
         site = session.get(Site, site_id)
         if not site:
@@ -132,31 +173,73 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
         if site.user_id != user_id:
             return None, "Unauthorized access to site."
 
+        # Determine admin status server-side — never from a request parameter.
+        user = session.get(User, user_id)
+        admin = user is not None and is_admin(user.email)
+
         is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
 
-        if mode != "quick":
-            if not site.verified_at and not is_dev_skip:
-                return None, "Site ownership must be verified before running full crawl or authenticated tests."
-            if mode == "credentials" and not site.verified_at and not is_dev_skip:
-                return None, "Site must be verified to run authenticated credentials tests."
+        limits_skipped = []  # for audit log
 
+        # ── Verification check ────────────────────────────────────────────
+        if mode != "quick":
+            if not site.verified_at and not is_dev_skip and not admin:
+                return None, "Site ownership must be verified before running full crawl or authenticated tests."
+            if mode == "credentials" and not site.verified_at and not is_dev_skip and not admin:
+                return None, "Site must be verified to run authenticated credentials tests."
+            if admin and not site.verified_at and not is_dev_skip:
+                limits_skipped.append("verification")
+
+        # ── SSRF check — never bypassed ───────────────────────────────────
         safe, reason = validate_url(site.url)
         if not safe:
             return None, f"Site URL is not safe to test: {reason}"
 
-        # Concurrency check (quick checks bypass global limit; all check per-user limit)
-        allowed, msg = check_concurrency_limits(session, user_id, mode=mode)
-        if not allowed:
-            return None, msg
+        # ── Global browser cap — always enforced, even for admins ─────────
+        if mode != "quick":
+            active_statuses = ["queued", "running"]
+            global_active = session.exec(
+                select(Run).where(Run.status.in_(active_statuses))
+            ).all()
+            if len(global_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
+                return None, "Platform is currently busy (global limit reached). Please try again shortly."
 
-        if mode == "quick":
-            allowed, msg = check_quick_check_limits(session, user_id, site)
-            if not allowed:
-                return None, msg
+        # ── Per-user concurrency — admin bypasses ─────────────────────────
+        if not admin:
+            active_statuses = ["queued", "running"]
+            user_active = session.exec(
+                select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
+            ).all()
+            if len(user_active) >= MAX_CONCURRENT_RUNS_PER_USER:
+                return None, "You already have a test currently running or queued."
         else:
-            allowed, msg = check_and_increment_daily_usage(session, user_id)
-            if not allowed:
-                return None, msg
+            # still log if there were already active runs (we bypassed the block)
+            active_statuses = ["queued", "running"]
+            user_active = session.exec(
+                select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
+            ).all()
+            if user_active:
+                limits_skipped.append("per-user-concurrency")
+
+        # ── Quota / quick-check limits ────────────────────────────────────
+        if mode == "quick":
+            if not admin:
+                allowed, msg = check_quick_check_limits(session, user_id, site)
+                if not allowed:
+                    return None, msg
+            else:
+                limits_skipped.append("quick-check-quota")
+        else:
+            if not admin:
+                allowed, msg = check_and_increment_daily_usage(session, user_id)
+                if not allowed:
+                    return None, msg
+            else:
+                limits_skipped.append("daily-run-quota")
+
+        # ── Audit log ─────────────────────────────────────────────────────
+        if admin and limits_skipped and user:
+            _log_admin_bypass(user_id, user.email, site.domain, limits_skipped)
 
         now_str = datetime.now(timezone.utc).isoformat()
         run = Run(
@@ -176,9 +259,13 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
         session.refresh(run)
         run_id = run.id
 
+    # RQ job timeout: admins get longer timeout plus a 60-second safety margin
+    from app.admin import get_admin_timeout_seconds
+    job_timeout = (get_admin_timeout_seconds() + 60) if admin else 300
+
     try:
         q = get_queue()
-        q.enqueue("app.worker.run_job_entry", run_id, job_timeout=300)
+        q.enqueue("app.worker.run_job_entry", run_id, job_timeout=job_timeout)
     except Exception:
         pass
 

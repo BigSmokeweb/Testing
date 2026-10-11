@@ -10,6 +10,9 @@
     <h1 class="page-title">
       Run #{{ run.id }}
       <span class="badge badge-{{ run.status }}" style="font-size:14px;vertical-align:middle;margin-left:8px;">{{ run.status }}</span>
+      {% if is_admin_run %}
+      <span class="badge" style="font-size:12px;vertical-align:middle;margin-left:6px;background:var(--warning,#92400e);color:#fef3c7;padding:2px 8px;border-radius:4px;" title="Admin account: domain ownership verification was skipped for this run">Admin: verification skipped</span>
+      {% endif %}
     </h1>
     <p class="page-subtitle">
       {% if site %}{{ site.domain }} · {% elif run.site %}{{ run.site.domain }} · {% endif %}

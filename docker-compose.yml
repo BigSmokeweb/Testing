@@ -65,6 +65,9 @@ services:
       FERNET_KEY:   ${FERNET_KEY:?err}
       LOCAL_MODE:   ${LOCAL_MODE:-0}
       SKIP_OWNERSHIP_FOR_DEV: ${SKIP_OWNERSHIP_FOR_DEV:-0}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      ADMIN_MAX_PAGES: ${ADMIN_MAX_PAGES:-100}
+      ADMIN_RUN_TIMEOUT_SECONDS: ${ADMIN_RUN_TIMEOUT_SECONDS:-900}
     volumes:
       - ./app:/app/app:ro
       - artifacts_data:/app/artifacts
@@ -93,6 +96,9 @@ services:
       REDIS_URL:    redis://redis:6379/0
       FERNET_KEY:   ${FERNET_KEY:?err}
       SKIP_OWNERSHIP_FOR_DEV: ${SKIP_OWNERSHIP_FOR_DEV:-0}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      ADMIN_MAX_PAGES: ${ADMIN_MAX_PAGES:-100}
+      ADMIN_RUN_TIMEOUT_SECONDS: ${ADMIN_RUN_TIMEOUT_SECONDS:-900}
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     volumes:
       - ./app:/app/app:ro
