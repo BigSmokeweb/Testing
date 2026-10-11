@@ -71,52 +71,87 @@
         </label>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-full btn-lg" id="wizard-step1-btn"
-              onclick="this.classList.add('loading')">
-        Continue to Domain Verification →
-      </button>
+      <div style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap;">
+        <button type="submit" name="action" value="quick_check" class="btn btn-secondary btn-lg" id="wizard-quick-btn" style="flex:1;min-width:200px;">
+          ⚡ Quick Check (Instant)
+        </button>
+        <button type="submit" name="action" value="verify" class="btn btn-primary btn-lg" id="wizard-step1-btn" style="flex:1;min-width:220px;"
+                onclick="this.classList.add('loading')">
+          Continue to Verification →
+        </button>
+      </div>
+      <p style="font-size:12px;color:var(--label-secondary);text-align:center;margin-top:var(--s3);">
+        Quick check runs immediately on 1 page (no verification needed). Verify to unlock full 25-page crawl & link check.
+      </p>
     </form>
   </div>
 
   <!-- ── STEP 2: Verify Domain ─────────────────────────────────────── -->
   {% elif step == 2 %}
   <div class="card">
-    <h2 class="card-title">Step 2 — Verify Ownership of <span style="font-family:var(--font-mono);">{{ site.domain }}</span></h2>
-    <p style="color:var(--text-muted);font-size:14px;margin-bottom:var(--sp-6);">
-      To prevent unauthorized testing, prove you control <strong>{{ site.domain }}</strong> using either method below.
-    </p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:var(--s3);margin-bottom:var(--s4);">
+      <div>
+        <h2 class="card-title" style="margin-bottom:var(--s1);">Verify Ownership of <span style="font-family:var(--font-mono);">{{ site.domain }}</span></h2>
+        <p style="color:var(--label-secondary);font-size:14px;">
+          Prove you control <strong>{{ site.domain }}</strong> to unlock multi-page crawling and link checking.
+        </p>
+      </div>
+      <form method="POST" action="/sites/{{ site.id }}/run" style="margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="mode" value="quick">
+        <button type="submit" class="btn btn-secondary btn-sm" id="step2-quick-btn">
+          ⚡ Skip & Run Quick Check
+        </button>
+      </form>
+    </div>
 
-    <!-- Method 1: DNS TXT -->
-    <div class="verify-card" aria-labelledby="dns-method-title">
-      <div class="verify-card-title" id="dns-method-title">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        Method 1: DNS TXT Record
+    <!-- Method 1: HTML Meta Tag (Easiest) -->
+    <div class="verify-card" aria-labelledby="meta-method-title">
+      <div class="verify-card-title" id="meta-method-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Method 1: HTML &lt;meta&gt; Tag (Recommended)
       </div>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-3);">Add a TXT record to your DNS zone:</p>
-      <div class="code-block" style="margin-bottom:var(--sp-3);">
-        <div><span class="code-key">Name: </span><span class="code-val">_autoqa.{{ site.domain }}</span></div>
-        <div style="margin-top:4px;"><span class="code-key">Value: </span><span class="code-val" id="dns-txt-val">autoqa-verify={{ site.verify_token }}</span></div>
+      <p style="font-size:13px;color:var(--label-secondary);margin-bottom:var(--s2);">Paste this tag inside the <code>&lt;head&gt;</code> of your homepage:</p>
+      <div class="code-block" style="margin-bottom:var(--s3);">
+        <span class="code-val">&lt;meta name="autoqa-verify" content="{{ site.verify_token }}"&gt;</span>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="copy-dns-btn"
-              onclick="navigator.clipboard.writeText('autoqa-verify={{ site.verify_token }}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy Value',2000)})">
-        Copy Value
+      <button type="button" class="btn btn-secondary btn-sm" id="copy-meta-btn"
+              onclick="navigator.clipboard.writeText('&lt;meta name=\x22autoqa-verify\x22 content=\x22{{ site.verify_token }}\x22&gt;').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy Tag',2000)})">
+        Copy Tag
       </button>
     </div>
 
-    <!-- Method 2: File -->
+    <!-- Method 2: Hosted Verification File -->
     <div class="verify-card" aria-labelledby="file-method-title">
       <div class="verify-card-title" id="file-method-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
         Method 2: Hosted Verification File
       </div>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-3);">Upload a text file containing only the token to your web server:</p>
-      <div class="code-block" style="margin-bottom:var(--sp-3);">
-        <div><span class="code-key">Path: </span><span class="code-val">{{ site.url }}/.well-known/autoqa-{{ site.verify_token }}.txt</span></div>
+      <p style="font-size:13px;color:var(--label-secondary);margin-bottom:var(--s2);">Upload a plain text file containing only the token:</p>
+      <div class="code-block" style="margin-bottom:var(--s3);">
+        <div><span class="code-key">URL: </span><span class="code-val">{{ site.url }}/.well-known/autoqa-{{ site.verify_token }}.txt</span></div>
         <div style="margin-top:4px;"><span class="code-key">Content: </span><span class="code-val" id="file-tok-val">{{ site.verify_token }}</span></div>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="copy-token-btn"
+      <button type="button" class="btn btn-secondary btn-sm" id="copy-token-btn"
               onclick="navigator.clipboard.writeText('{{ site.verify_token }}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy Token',2000)})">
         Copy Token
+      </button>
+    </div>
+
+    <!-- Method 3: DNS TXT -->
+    <div class="verify-card" aria-labelledby="dns-method-title">
+      <div class="verify-card-title" id="dns-method-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        Method 3: DNS TXT Record
+      </div>
+      <p style="font-size:13px;color:var(--label-secondary);margin-bottom:var(--s2);">Add a TXT record to your DNS zone:</p>
+      <div class="code-block" style="margin-bottom:var(--s3);">
+        <div><span class="code-key">Name: </span><span class="code-val">_autoqa.{{ site.domain }}</span></div>
+        <div style="margin-top:4px;"><span class="code-key">Value: </span><span class="code-val" id="dns-txt-val">autoqa-verify={{ site.verify_token }}</span></div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" id="copy-dns-btn"
+              onclick="navigator.clipboard.writeText('autoqa-verify={{ site.verify_token }}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy Value',2000)})">
+        Copy Value
       </button>
     </div>
 
