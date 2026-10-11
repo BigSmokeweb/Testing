@@ -82,15 +82,97 @@ def check_well_known_file(url: str, token: str) -> bool:
     return False
 
 
+from html.parser import HTMLParser
+
+
+DISALLOWED_SHARED_PUBLIC_SUFFIXES = {
+    "vercel.app",
+    "github.io",
+    "netlify.app",
+    "herokuapp.com",
+    "azurewebsites.net",
+    "pages.dev",
+    "gitlab.io",
+    "firebaseapp.com",
+    "web.app",
+}
+
+
+class MetaTagVerifyParser(HTMLParser):
+    def __init__(self, expected_token: str):
+        super().__init__()
+        self.expected_token = expected_token
+        self.found = False
+        self.in_head = False
+
+    def handle_starttag(self, tag, attrs):
+        tag_lower = tag.lower()
+        if tag_lower == "head":
+            self.in_head = True
+        elif tag_lower == "meta" and self.in_head:
+            attr_dict = {k.lower(): v for k, v in attrs if k}
+            name_val = attr_dict.get("name", "").strip().lower()
+            content_val = attr_dict.get("content", "").strip()
+            if name_val == "autoqa-verify" and content_val == self.expected_token:
+                self.found = True
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "head":
+            self.in_head = False
+
+
+def check_html_meta_tag(url: str, token: str) -> bool:
+    """
+    Checks if <url> has <meta name="autoqa-verify" content="<token>"> inside <head>.
+    Uses safe_http_fetch with SSRF guards and 100 KB limit.
+    """
+    try:
+        from app.safety import safe_http_fetch
+        status_code, content, _ = safe_http_fetch(
+            url,
+            timeout=5,
+            max_redirects=2,
+            max_bytes=MAX_VERIFY_FILE_BYTES,
+        )
+        if status_code != 200:
+            return False
+
+        html_text = content.decode("utf-8", errors="ignore")
+        # Extract <head> section only to avoid parsing huge body
+        head_end = html_text.lower().find("</head>")
+        if head_end != -1:
+            head_snippet = html_text[:head_end + 7]
+        else:
+            head_snippet = html_text[:20000]
+
+        parser = MetaTagVerifyParser(token)
+        parser.feed(head_snippet)
+        return parser.found
+    except Exception as e:
+        logger.warning(f"Meta tag verification failed for {url}: {e}")
+        return False
+
+
 def verify_site_ownership(site: Site) -> bool:
     import os
-    if os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1":
+    # Refuse to verify root shared public suffixes directly (e.g. vercel.app itself)
+    domain_clean = site.domain.lower().strip()
+    if domain_clean in DISALLOWED_SHARED_PUBLIC_SUFFIXES:
+        logger.warning(f"Refusing to verify shared public suffix domain: {domain_clean}")
+        return False
+
+    # SKIP_OWNERSHIP_FOR_DEV is honored ONLY when LOCAL_MODE=1, strictly ignored in production
+    if os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1":
         return True
-    # 1. DNS TXT check
-    if check_dns_txt_record(site.domain, site.verify_token):
+
+    # 1. HTML Meta Tag check (easiest, checked first)
+    if check_html_meta_tag(site.url, site.verify_token):
         return True
     # 2. Well-known file check
     if check_well_known_file(site.url, site.verify_token):
+        return True
+    # 3. DNS TXT check
+    if check_dns_txt_record(site.domain, site.verify_token):
         return True
     return False
 
