@@ -879,6 +879,15 @@ async def wizard_step1(request: Request):
         from urllib.parse import quote_plus
         return RedirectResponse(url=f"/wizard?url={quote_plus(raw_url)}&error={quote_plus(err)}", status_code=303)
 
+    action = parsed.get("action", ["verify"])[0]
+    if action == "quick_check":
+        # Launch instant single-page quick check immediately without requiring domain verification
+        run, run_err = enqueue_run(user.id, site.id, mode="quick")
+        if run_err:
+            from urllib.parse import quote_plus
+            return RedirectResponse(url=f"/wizard?site_id={site.id}&error={quote_plus(run_err)}", status_code=303)
+        return RedirectResponse(url=f"/progress/{run.id}", status_code=303)
+
     if site.verified_at:
         return RedirectResponse(url=f"/wizard?site_id={site.id}", status_code=303)
     return RedirectResponse(url=f"/wizard?site_id={site.id}", status_code=303)
