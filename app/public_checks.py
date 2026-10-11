@@ -309,8 +309,8 @@ def run_public_checks(run_id: int) -> None:
                     if page_load_ms is None or page_load_ms <= 0:
                         page_load_ms = int((time.time() - page_start_time) * 1000)
 
-                    # Extract internal links
-                    if status_code < 400 and not error_msg:
+                    # Extract internal links (skip completely if run_mode == 'quick')
+                    if run_mode != "quick" and status_code < 400 and not error_msg:
                         try:
                             hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.getAttribute('href'))")
                             for href in hrefs:
@@ -377,19 +377,42 @@ def run_public_checks(run_id: int) -> None:
                             )
                         session.commit()
 
+                    # For quick checks, single page only: stop queue immediately
+                    if run_mode == "quick":
+                        break
+
             finally:
                 context.close()
                 browser.close()
 
-        # Link check verification
+        # Link check verification (strictly skipped for mode='quick')
         link_results = []
-        headers = {"User-Agent": "AutoQA-PublicChecks/2.0"}
-        for source_url, target_url in list(discovered_internal_links)[:50]:
-            if (time.time() - start_ts) >= MAX_BUDGET_SECONDS:
-                break
-            try:
-                safe, _ = validate_url(target_url)
-                if not safe:
+        if run_mode != "quick":
+            headers = {"User-Agent": "AutoQA-PublicChecks/2.0"}
+            for source_url, target_url in list(discovered_internal_links)[:50]:
+                if (time.time() - start_ts) >= MAX_BUDGET_SECONDS:
+                    break
+                try:
+                    safe, _ = validate_url(target_url)
+                    if not safe:
+                        link_results.append({
+                            "run_id": run_id,
+                            "source_url": source_url,
+                            "target_url": target_url,
+                            "status_code": 0,
+                            "ok": False,
+                        })
+                        continue
+
+                    status, _, _ = safe_http_fetch(target_url, headers=headers, timeout=5, max_redirects=5, max_bytes=100*1024)
+                    link_results.append({
+                        "run_id": run_id,
+                        "source_url": source_url,
+                        "target_url": target_url,
+                        "status_code": status,
+                        "ok": (status < 400),
+                    })
+                except Exception:
                     link_results.append({
                         "run_id": run_id,
                         "source_url": source_url,
@@ -397,24 +420,6 @@ def run_public_checks(run_id: int) -> None:
                         "status_code": 0,
                         "ok": False,
                     })
-                    continue
-
-                status, _, _ = safe_http_fetch(target_url, headers=headers, timeout=5, max_redirects=5, max_bytes=100*1024)
-                link_results.append({
-                    "run_id": run_id,
-                    "source_url": source_url,
-                    "target_url": target_url,
-                    "status_code": status,
-                    "ok": (status < 400),
-                })
-            except Exception:
-                link_results.append({
-                    "run_id": run_id,
-                    "source_url": source_url,
-                    "target_url": target_url,
-                    "status_code": 0,
-                    "ok": False,
-                })
 
         if link_results:
             with Session(engine) as session:
