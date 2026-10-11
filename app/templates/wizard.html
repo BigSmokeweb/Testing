@@ -120,16 +120,16 @@
       </button>
     </div>
 
-    <div style="display:flex;gap:var(--sp-3);margin-top:var(--sp-2);">
+    <div style="display:flex;gap:var(--s3);align-items:center;margin-top:var(--s4);">
       <form method="POST" action="/wizard/step2/verify" style="flex:1;margin:0;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="site_id" value="{{ site.id }}">
-        <button type="submit" class="btn btn-success btn-full btn-lg" id="verify-now-btn"
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="verify-now-btn"
                 onclick="this.classList.add('loading')">
           Verify Now →
         </button>
       </form>
-      <a href="/wizard" class="btn btn-ghost" style="min-height:52px;padding:14px 20px;">Start Over</a>
+      <a href="/wizard" class="btn btn-secondary btn-lg">Start Over</a>
     </div>
   </div>
 

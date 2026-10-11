@@ -541,6 +541,55 @@ p {
   background: rgba(255, 59, 48, 0.22);
 }
 
+.btn-success {
+  background: var(--blue);
+  color: #FFFFFF;
+}
+
+.btn-success:hover {
+  background: var(--blue-hover);
+  color: #FFFFFF;
+}
+
+.verify-card {
+  background: var(--bg-secondary);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--r-md);
+  padding: var(--s4);
+  margin-bottom: var(--s4);
+}
+
+.verify-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--label);
+  margin-bottom: var(--s2);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.code-block {
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: var(--s3);
+  overflow-x: auto;
+}
+
+.code-key {
+  color: var(--label-secondary);
+}
+
+.code-val {
+  color: var(--blue);
+  font-weight: 500;
+}
+
 .btn-sm {
   min-height: 34px;
   padding: 0 14px;
