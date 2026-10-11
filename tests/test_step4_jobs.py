@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app.main import app
 from app.models import User, Site, Run, Usage, engine
 from app.auth import create_session_token, SESSION_COOKIE_NAME, hash_password
-from app.jobs import enqueue_run
+from app.jobs import enqueue_run, MAX_RUNS_PER_USER_PER_DAY
 from app.worker import run_job_entry
 
 
@@ -82,17 +82,17 @@ class TestJobsAndWorker(unittest.TestCase):
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             usage = session.exec(select(Usage).where(Usage.user_id == self.user_id, Usage.date == today)).first()
             if not usage:
-                usage = Usage(user_id=self.user_id, date=today, runs_count=5)
+                usage = Usage(user_id=self.user_id, date=today, runs_count=MAX_RUNS_PER_USER_PER_DAY)
                 session.add(usage)
             else:
-                usage.runs_count = 5
+                usage.runs_count = MAX_RUNS_PER_USER_PER_DAY
                 session.add(usage)
             session.commit()
 
         # Enqueue should be refused due to daily quota
         run, err = enqueue_run(self.user_id, self.site_id)
         self.assertIsNone(run)
-        self.assertIn("Daily limit of 5 runs reached", err)
+        self.assertIn(f"Daily limit of {MAX_RUNS_PER_USER_PER_DAY} runs reached", err)
 
 
 if __name__ == "__main__":
