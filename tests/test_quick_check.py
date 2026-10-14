@@ -17,6 +17,12 @@ from app.sites import (
 class TestQuickCheckAndMetaVerification(unittest.TestCase):
     def setUp(self):
         with Session(engine) as session:
+            # Clear active queued/running runs from DB so global caps are not hit
+            active = session.exec(select(Run).where(Run.status.in_(["queued", "running"]))).all()
+            for r in active:
+                r.status = "completed"
+            session.commit()
+
             # Create a test user
             self.user = User(
                 email=f"quickuser_{os.urandom(4).hex()}@example.com",
@@ -309,6 +315,60 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
         self.assertNotEqual(normalize_domain("app.example.com"), normalize_domain("example.com"))
         # Combination: www.Example.com.:8443
         self.assertEqual(normalize_domain("www.Example.com.:8443"), "example.com")
+
+    def test_concurrent_quick_checks_quota_race(self):
+        import concurrent.futures
+
+        today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with Session(engine) as session:
+            # Seed 2 existing quick check runs for today (quota is 3, so only 1 more can pass)
+            for _ in range(2):
+                session.add(
+                    Run(
+                        user_id=self.user_id,
+                        site_id=self.site_id,
+                        mode="quick",
+                        status="completed",
+                        started_at="",
+                        finished_at="",
+                        queued_at=f"{today_prefix}T10:00:00+00:00",
+                    )
+                )
+            session.commit()
+
+        with Session(engine) as session:
+            # Clear any active queued/running runs
+            active = session.exec(select(Run).where(Run.status.in_(["queued", "running"]))).all()
+            for r in active:
+                r.status = "completed"
+            session.commit()
+
+        results = []
+        errors = []
+
+        def call_enqueue():
+            with patch("app.jobs.validate_url", return_value=(True, "")):
+                # Mock per-user concurrency check so race focuses specifically on daily quota count
+                with patch("app.jobs.MAX_CONCURRENT_RUNS_PER_USER", 10):
+                    r, err = enqueue_run(self.user_id, self.site_id, mode="quick")
+                    return r, err
+
+        # Fire two threads concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(call_enqueue), executor.submit(call_enqueue)]
+            for f in concurrent.futures.as_completed(futures):
+                r, err = f.result()
+                results.append(r)
+                errors.append(err)
+
+        accepted = [r for r in results if r is not None]
+        rejected = [err for err in errors if err is not None]
+
+        # Exactly 1 should be accepted and 1 rejected due to daily quota
+        self.assertEqual(len(accepted), 1, f"Expected exactly 1 accepted, got {len(accepted)}")
+        self.assertEqual(len(rejected), 1, f"Expected exactly 1 rejected, got {len(rejected)}")
+        self.assertIn("Daily limit of 3 quick checks reached", rejected[0])
+
 
 
 

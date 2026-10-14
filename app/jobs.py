@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 import redis
@@ -151,6 +152,16 @@ def _log_admin_bypass(user_id: int, user_email: str, site_domain: str, limits_sk
         pass
 
 
+_USER_ENQUEUE_LOCKS = {}
+_LOCKS_MUTEX = threading.Lock()
+
+def _get_user_lock(user_id: int) -> threading.Lock:
+    with _LOCKS_MUTEX:
+        if user_id not in _USER_ENQUEUE_LOCKS:
+            _USER_ENQUEUE_LOCKS[user_id] = threading.Lock()
+        return _USER_ENQUEUE_LOCKS[user_id]
+
+
 def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optional[Run], Optional[str]]:
     """
     Enforces quality gates and, for admin users, grants appropriate bypasses.
@@ -174,15 +185,26 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
     """
     from app.admin import is_admin
 
-    with Session(engine) as session:
-        site = session.get(Site, site_id)
-        if not site:
-            return None, "Site not found."
-        if site.user_id != user_id:
-            return None, "Unauthorized access to site."
+    user_lock = _get_user_lock(user_id)
+    with user_lock:
+        with Session(engine) as session:
+            site = session.get(Site, site_id)
+            if not site:
+                return None, "Site not found."
+            if site.user_id != user_id:
+                return None, "Unauthorized access to site."
 
-        # Determine admin status server-side — never from a request parameter.
-        user = session.get(User, user_id)
+            # Lock user row or use advisory lock on PostgreSQL to prevent concurrency races.
+            from sqlalchemy import text
+            try:
+                if engine.dialect.name == "postgresql":
+                    # Advisory transaction lock for user_id ensures serial execution of quota checks
+                    session.exec(text("SELECT pg_advisory_xact_lock(:uid)"), params={"uid": user_id})
+                user = session.exec(select(User).where(User.id == user_id).with_for_update()).first()
+            except Exception:
+                user = session.get(User, user_id)
+
+            # Determine admin status server-side — never from a request parameter.
         admin = user is not None and is_admin(user.email)
 
         is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
