@@ -186,3 +186,67 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
         )
         with patch.dict(os.environ, {"LOCAL_MODE": "1", "SKIP_OWNERSHIP_FOR_DEV": "1"}):
             self.assertTrue(verify_site_ownership(site))
+
+    def test_quick_check_global_concurrency_cap(self):
+        with Session(engine) as session:
+            # Seed 2 running quick runs
+            for _ in range(2):
+                session.add(
+                    Run(
+                        user_id=self.user_id,
+                        site_id=self.site_id,
+                        mode="quick",
+                        status="running",
+                        started_at="",
+                        finished_at="",
+                    )
+                )
+            session.commit()
+
+        with patch("app.jobs.validate_url", return_value=(True, "")):
+            with patch.dict(os.environ, {"MAX_CONCURRENT_QUICK_RUNS_GLOBAL": "2"}):
+                run, err = enqueue_run(self.user_id, self.site_id, mode="quick")
+                self.assertIsNone(run)
+                self.assertIn("Platform is busy with quick checks. Please try again in a minute.", err)
+
+    def test_quick_and_full_runs_do_not_cross_count_global_caps(self):
+        # 3 active full runs should NOT block a quick check
+        with Session(engine) as session:
+            # Clear active
+            active = session.exec(select(Run).where(Run.status.in_(["queued", "running"]))).all()
+            for r in active:
+                r.status = "completed"
+            for _ in range(3):
+                session.add(
+                    Run(
+                        user_id=self.user_id,
+                        site_id=self.site_id,
+                        mode="public",
+                        status="running",
+                        started_at="",
+                        finished_at="",
+                    )
+                )
+            session.commit()
+
+        # Another user so per-user limit isn't tripped
+        other_user = None
+        with Session(engine) as session:
+            other_user = User(email=f"cross_{os.urandom(4).hex()}@example.com", password_hash="hash")
+            session.add(other_user)
+            session.commit()
+            session.refresh(other_user)
+            other_site = Site(user_id=other_user.id, url=f"https://cross-{os.urandom(4).hex()}.example.com", domain="cross.example.com", verify_token="tok")
+            session.add(other_site)
+            session.commit()
+            session.refresh(other_site)
+            uid = other_user.id
+            sid = other_site.id
+
+        with patch("app.jobs.validate_url", return_value=(True, "")):
+            with patch.dict(os.environ, {"MAX_CONCURRENT_QUICK_RUNS_GLOBAL": "2", "MAX_CONCURRENT_RUNS_GLOBAL": "3"}):
+                # Quick check still succeeds even though full runs hit global cap
+                run, err = enqueue_run(uid, sid, mode="quick")
+                self.assertIsNotNone(run, f"Expected quick run to enqueue, got error: {err}")
+                self.assertIsNone(err)
+

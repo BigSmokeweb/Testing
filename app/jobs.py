@@ -14,9 +14,11 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_NAME = "autoqa_runs"
 
 # Limits from PLAN2.md (set to 50 for local dev / testing; change to 5 for production deployment)
+# Limits from PLAN2.md (set to 50 for local dev / testing; change to 5 for production deployment)
 MAX_RUNS_PER_USER_PER_DAY = int(os.getenv("MAX_RUNS_PER_USER_PER_DAY", "50"))
 MAX_CONCURRENT_RUNS_PER_USER = 1
 MAX_CONCURRENT_RUNS_GLOBAL = 3
+MAX_CONCURRENT_QUICK_RUNS_GLOBAL = int(os.getenv("MAX_CONCURRENT_QUICK_RUNS_GLOBAL", "2"))
 
 
 def get_redis_connection():
@@ -52,19 +54,23 @@ def check_and_increment_daily_usage(session: Session, user_id: int) -> Tuple[boo
 def check_concurrency_limits(session: Session, user_id: int, mode: str = "public") -> Tuple[bool, str]:
     """
     Checks concurrency limits.
-    Quick checks (mode='quick') are single-page instant fetches, so they
-    bypass the global platform limit but still respect the per-user 1-run limit.
-    Admin runs bypass the per-user limit but NOT the global browser cap
-    (enforced in enqueue_run after this function).
+    Quick checks (mode='quick') count against MAX_CONCURRENT_QUICK_RUNS_GLOBAL.
+    Full/credential runs count against MAX_CONCURRENT_RUNS_GLOBAL.
     """
     active_statuses = ["queued", "running"]
 
-    # Global limit only applies to full crawl / credentials runs (not quick checks)
-    if mode != "quick":
-        global_active = session.exec(
-            select(Run).where(Run.status.in_(active_statuses))
+    if mode == "quick":
+        quick_active = session.exec(
+            select(Run).where(Run.status.in_(active_statuses), Run.mode == "quick")
         ).all()
-        if len(global_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
+        max_quick = int(os.getenv("MAX_CONCURRENT_QUICK_RUNS_GLOBAL", str(MAX_CONCURRENT_QUICK_RUNS_GLOBAL)))
+        if len(quick_active) >= max_quick:
+            return False, "Platform is busy with quick checks. Please try again in a minute."
+    else:
+        full_active = session.exec(
+            select(Run).where(Run.status.in_(active_statuses), Run.mode != "quick")
+        ).all()
+        if len(full_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
             return False, "Platform is currently busy (global limit reached). Please try again shortly."
 
     # Per-user 1-run limit (admins bypass this; handled in enqueue_run)
@@ -195,13 +201,20 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
         if not safe:
             return None, f"Site URL is not safe to test: {reason}"
 
-        # ── Global browser cap — always enforced, even for admins ─────────
-        if mode != "quick":
-            active_statuses = ["queued", "running"]
-            global_active = session.exec(
-                select(Run).where(Run.status.in_(active_statuses))
+        # ── Global browser / quick caps — always enforced, even for admins ──
+        active_statuses = ["queued", "running"]
+        if mode == "quick":
+            quick_active = session.exec(
+                select(Run).where(Run.status.in_(active_statuses), Run.mode == "quick")
             ).all()
-            if len(global_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
+            max_quick = int(os.getenv("MAX_CONCURRENT_QUICK_RUNS_GLOBAL", str(MAX_CONCURRENT_QUICK_RUNS_GLOBAL)))
+            if len(quick_active) >= max_quick:
+                return None, "Platform is busy with quick checks. Please try again in a minute."
+        else:
+            full_active = session.exec(
+                select(Run).where(Run.status.in_(active_statuses), Run.mode != "quick")
+            ).all()
+            if len(full_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
                 return None, "Platform is currently busy (global limit reached). Please try again shortly."
 
         # ── Per-user concurrency — admin bypasses ─────────────────────────
