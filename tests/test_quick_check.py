@@ -369,6 +369,64 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
         self.assertEqual(len(rejected), 1, f"Expected exactly 1 rejected, got {len(rejected)}")
         self.assertIn("Daily limit of 3 quick checks reached", rejected[0])
 
+    @unittest.skipUnless(engine.dialect.name == "postgresql", "PostgreSQL advisory lock concurrency test")
+    def test_postgres_global_quick_cap_boundary_race(self):
+        import concurrent.futures
+
+        # Clean active runs
+        with Session(engine) as s:
+            active = s.exec(select(Run).where(Run.status.in_(["queued", "running"]))).all()
+            for r in active:
+                r.status = "completed"
+            s.commit()
+
+            # Seed 1 running quick run (cap is 2 -> exactly 1 slot remains)
+            r1 = Run(
+                user_id=self.user_id,
+                site_id=self.site_id,
+                mode="quick",
+                status="running",
+                started_at=datetime.now(timezone.utc).isoformat(),
+                finished_at="",
+                queued_at=datetime.now(timezone.utc).isoformat(),
+            )
+            s.add(r1)
+            s.commit()
+
+        # Create 5 distinct users
+        test_users = []
+        with Session(engine) as s:
+            for i in range(5):
+                u = User(email=f"pg_bnd_{i}_{os.urandom(4).hex()}@example.com", password_hash="pass")
+                s.add(u)
+                s.commit()
+                s.refresh(u)
+                st = Site(user_id=u.id, url=f"https://pg-bnd-{i}.example.com", domain=f"pg-bnd-{i}.example.com", verify_token="t")
+                s.add(st)
+                s.commit()
+                s.refresh(st)
+                test_users.append((u.id, st.id))
+
+        def call_enq(uid, sid):
+            with patch("app.jobs.validate_url", return_value=(True, "")):
+                with patch.dict(os.environ, {"MAX_CONCURRENT_QUICK_RUNS_GLOBAL": "2"}):
+                    return enqueue_run(uid, sid, mode="quick")
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futs = [executor.submit(call_enq, uid, sid) for uid, sid in test_users]
+            for f in concurrent.futures.as_completed(futs):
+                results.append(f.result())
+
+        accepted = [r for r, err in results if r is not None]
+        refused = [err for r, err in results if r is None]
+
+        self.assertEqual(len(accepted), 1, f"Expected exactly 1 accepted, got {len(accepted)}")
+        self.assertEqual(len(refused), 4, f"Expected exactly 4 refused, got {len(refused)}")
+        for err in refused:
+            self.assertIn("Platform is busy with quick checks. Please try again in a minute.", err)
+
+
 
 
 

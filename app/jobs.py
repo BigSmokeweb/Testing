@@ -154,6 +154,13 @@ def _log_admin_bypass(user_id: int, user_email: str, site_domain: str, limits_sk
 
 _USER_ENQUEUE_LOCKS = {}
 _LOCKS_MUTEX = threading.Lock()
+_GLOBAL_QUICK_LOCK = threading.Lock()
+_GLOBAL_FULL_LOCK = threading.Lock()
+
+# Advisory lock constant keys on PostgreSQL
+PG_ADVISORY_LOCK_GLOBAL_QUICK = 7340001
+PG_ADVISORY_LOCK_GLOBAL_FULL = 7340002
+
 
 def _get_user_lock(user_id: int) -> threading.Lock:
     with _LOCKS_MUTEX:
@@ -186,115 +193,121 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
     from app.admin import is_admin
 
     user_lock = _get_user_lock(user_id)
+    global_process_lock = _GLOBAL_QUICK_LOCK if mode == "quick" else _GLOBAL_FULL_LOCK
+
+    # Always acquire per-user lock first, then global lock to avoid deadlocks
     with user_lock:
-        with Session(engine) as session:
-            site = session.get(Site, site_id)
-            if not site:
-                return None, "Site not found."
-            if site.user_id != user_id:
-                return None, "Unauthorized access to site."
+        with global_process_lock:
+            with Session(engine) as session:
+                site = session.get(Site, site_id)
+                if not site:
+                    return None, "Site not found."
+                if site.user_id != user_id:
+                    return None, "Unauthorized access to site."
 
-            # Lock user row or use advisory lock on PostgreSQL to prevent concurrency races.
-            from sqlalchemy import text
-            try:
-                if engine.dialect.name == "postgresql":
-                    # Advisory transaction lock for user_id ensures serial execution of quota checks
-                    session.exec(text("SELECT pg_advisory_xact_lock(:uid)"), params={"uid": user_id})
-                user = session.exec(select(User).where(User.id == user_id).with_for_update()).first()
-            except Exception:
-                user = session.get(User, user_id)
+                # Lock user row or use advisory locks on PostgreSQL to prevent concurrency races.
+                # Always acquired in strict order: per-user lock first, then global cap lock.
+                from sqlalchemy import text
+                try:
+                    if engine.dialect.name == "postgresql":
+                        session.exec(text("SELECT pg_advisory_xact_lock(:uid)"), params={"uid": user_id})
+                        global_lock_key = PG_ADVISORY_LOCK_GLOBAL_QUICK if mode == "quick" else PG_ADVISORY_LOCK_GLOBAL_FULL
+                        session.exec(text("SELECT pg_advisory_xact_lock(:gid)"), params={"gid": global_lock_key})
+                    user = session.exec(select(User).where(User.id == user_id).with_for_update()).first()
+                except Exception:
+                    user = session.get(User, user_id)
 
-            # Determine admin status server-side — never from a request parameter.
-        admin = user is not None and is_admin(user.email)
+                # Determine admin status server-side — never from a request parameter.
+                admin = user is not None and is_admin(user.email)
 
-        is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
+                is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
 
-        limits_skipped = []  # for audit log
+                limits_skipped = []  # for audit log
 
-        # ── Verification check ────────────────────────────────────────────
-        if mode != "quick":
-            if not site.verified_at and not is_dev_skip and not admin:
-                return None, "Site ownership must be verified before running full crawl or authenticated tests."
-            if mode == "credentials" and not site.verified_at and not is_dev_skip and not admin:
-                return None, "Site must be verified to run authenticated credentials tests."
-            if admin and not site.verified_at and not is_dev_skip:
-                limits_skipped.append("verification")
+                # ── Verification check ────────────────────────────────────────────
+                if mode != "quick":
+                    if not site.verified_at and not is_dev_skip and not admin:
+                        return None, "Site ownership must be verified before running full crawl or authenticated tests."
+                    if mode == "credentials" and not site.verified_at and not is_dev_skip and not admin:
+                        return None, "Site must be verified to run authenticated credentials tests."
+                    if admin and not site.verified_at and not is_dev_skip:
+                        limits_skipped.append("verification")
 
-        # ── SSRF check — never bypassed ───────────────────────────────────
-        safe, reason = validate_url(site.url)
-        if not safe:
-            return None, f"Site URL is not safe to test: {reason}"
+                # ── SSRF check — never bypassed ───────────────────────────────────
+                safe, reason = validate_url(site.url)
+                if not safe:
+                    return None, f"Site URL is not safe to test: {reason}"
 
-        # ── Global browser / quick caps — always enforced, even for admins ──
-        active_statuses = ["queued", "running"]
-        if mode == "quick":
-            quick_active = session.exec(
-                select(Run).where(Run.status.in_(active_statuses), Run.mode == "quick")
-            ).all()
-            max_quick = int(os.getenv("MAX_CONCURRENT_QUICK_RUNS_GLOBAL", str(MAX_CONCURRENT_QUICK_RUNS_GLOBAL)))
-            if len(quick_active) >= max_quick:
-                return None, "Platform is busy with quick checks. Please try again in a minute."
-        else:
-            full_active = session.exec(
-                select(Run).where(Run.status.in_(active_statuses), Run.mode != "quick")
-            ).all()
-            if len(full_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
-                return None, "Platform is currently busy (global limit reached). Please try again shortly."
+                # ── Global browser / quick caps — always enforced, even for admins ──
+                active_statuses = ["queued", "running"]
+                if mode == "quick":
+                    quick_active = session.exec(
+                        select(Run).where(Run.status.in_(active_statuses), Run.mode == "quick")
+                    ).all()
+                    max_quick = int(os.getenv("MAX_CONCURRENT_QUICK_RUNS_GLOBAL", str(MAX_CONCURRENT_QUICK_RUNS_GLOBAL)))
+                    if len(quick_active) >= max_quick:
+                        return None, "Platform is busy with quick checks. Please try again in a minute."
+                else:
+                    full_active = session.exec(
+                        select(Run).where(Run.status.in_(active_statuses), Run.mode != "quick")
+                    ).all()
+                    if len(full_active) >= MAX_CONCURRENT_RUNS_GLOBAL:
+                        return None, "Platform is currently busy (global limit reached). Please try again shortly."
 
-        # ── Per-user concurrency — admin bypasses ─────────────────────────
-        if not admin:
-            active_statuses = ["queued", "running"]
-            user_active = session.exec(
-                select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
-            ).all()
-            if len(user_active) >= MAX_CONCURRENT_RUNS_PER_USER:
-                return None, "You already have a test currently running or queued."
-        else:
-            # still log if there were already active runs (we bypassed the block)
-            active_statuses = ["queued", "running"]
-            user_active = session.exec(
-                select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
-            ).all()
-            if user_active:
-                limits_skipped.append("per-user-concurrency")
+                # ── Per-user concurrency — admin bypasses ─────────────────────────
+                if not admin:
+                    active_statuses = ["queued", "running"]
+                    user_active = session.exec(
+                        select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
+                    ).all()
+                    if len(user_active) >= MAX_CONCURRENT_RUNS_PER_USER:
+                        return None, "You already have a test currently running or queued."
+                else:
+                    # still log if there were already active runs (we bypassed the block)
+                    active_statuses = ["queued", "running"]
+                    user_active = session.exec(
+                        select(Run).where(Run.user_id == user_id, Run.status.in_(active_statuses))
+                    ).all()
+                    if user_active:
+                        limits_skipped.append("per-user-concurrency")
 
-        # ── Quota / quick-check limits ────────────────────────────────────
-        if mode == "quick":
-            if not admin:
-                allowed, msg = check_quick_check_limits(session, user_id, site)
-                if not allowed:
-                    return None, msg
-            else:
-                limits_skipped.append("quick-check-quota")
-        else:
-            if not admin:
-                allowed, msg = check_and_increment_daily_usage(session, user_id)
-                if not allowed:
-                    return None, msg
-            else:
-                limits_skipped.append("daily-run-quota")
+                # ── Quota / quick-check limits ────────────────────────────────────
+                if mode == "quick":
+                    if not admin:
+                        allowed, msg = check_quick_check_limits(session, user_id, site)
+                        if not allowed:
+                            return None, msg
+                    else:
+                        limits_skipped.append("quick-check-quota")
+                else:
+                    if not admin:
+                        allowed, msg = check_and_increment_daily_usage(session, user_id)
+                        if not allowed:
+                            return None, msg
+                    else:
+                        limits_skipped.append("daily-run-quota")
 
-        # ── Audit log ─────────────────────────────────────────────────────
-        if admin and limits_skipped and user:
-            _log_admin_bypass(user_id, user.email, site.domain, limits_skipped)
+                # ── Audit log ─────────────────────────────────────────────────────
+                if admin and limits_skipped and user:
+                    _log_admin_bypass(user_id, user.email, site.domain, limits_skipped)
 
-        now_str = datetime.now(timezone.utc).isoformat()
-        run = Run(
-            user_id=user_id,
-            site_id=site_id,
-            mode=mode,
-            engine="chromium",
-            status="queued",
-            started_at=now_str,
-            finished_at="",
-            duration_ms=0,
-            session_valid=True,
-            queued_at=now_str,
-        )
-        session.add(run)
-        session.commit()
-        session.refresh(run)
-        run_id = run.id
+                now_str = datetime.now(timezone.utc).isoformat()
+                run = Run(
+                    user_id=user_id,
+                    site_id=site_id,
+                    mode=mode,
+                    engine="chromium",
+                    status="queued",
+                    started_at=now_str,
+                    finished_at="",
+                    duration_ms=0,
+                    session_valid=True,
+                    queued_at=now_str,
+                )
+                session.add(run)
+                session.commit()
+                session.refresh(run)
+                run_id = run.id
 
     # RQ job timeout: admins get longer timeout plus a 60-second safety margin
     from app.admin import get_admin_timeout_seconds
