@@ -237,12 +237,13 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
 
         # Another user so per-user limit isn't tripped
         other_user = None
+        unique_cross_dom = f"cross-{os.urandom(4).hex()}.example.com"
         with Session(engine) as session:
             other_user = User(email=f"cross_{os.urandom(4).hex()}@example.com", password_hash="hash")
             session.add(other_user)
             session.commit()
             session.refresh(other_user)
-            other_site = Site(user_id=other_user.id, url=f"https://cross-{os.urandom(4).hex()}.example.com", domain="cross.example.com", verify_token="tok")
+            other_site = Site(user_id=other_user.id, url=f"https://{unique_cross_dom}", domain=unique_cross_dom, verify_token="tok")
             session.add(other_site)
             session.commit()
             session.refresh(other_site)
