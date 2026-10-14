@@ -250,3 +250,47 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
                 self.assertIsNotNone(run, f"Expected quick run to enqueue, got error: {err}")
                 self.assertIsNone(err)
 
+    def test_worker_refuses_public_mode_on_unverified_site(self):
+        from app.worker import run_job_entry
+
+        with Session(engine) as session:
+            run = Run(
+                user_id=self.user_id,
+                site_id=self.site_id,
+                mode="public",
+                status="queued",
+                started_at="",
+                finished_at="",
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            run_id = run.id
+
+        with patch.dict(os.environ, {"LOCAL_MODE": "0", "ADMIN_EMAILS": ""}):
+            run_job_entry(run_id)
+
+        with Session(engine) as session:
+            refreshed = session.get(Run, run_id)
+            self.assertEqual(refreshed.status, "failed")
+            self.assertIn("Site is not verified", refreshed.note)
+
+    def test_http_post_public_mode_refused_on_unverified_site(self):
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch.dict(os.environ, {"LOCAL_MODE": "0", "ADMIN_EMAILS": ""}):
+            with patch("app.main.get_current_user", return_value=self.user):
+                with patch("app.main.verify_csrf_token", return_value=True):
+                    res = client.post(
+                        f"/sites/{self.site_id}/run",
+                        data={"mode": "public", "csrf_token": "token"},
+                        follow_redirects=False,
+                    )
+                    # Redirects back to /sites with error in query param
+                    self.assertEqual(res.status_code, 303)
+                    self.assertIn("error=", res.headers["location"])
+                    self.assertIn("must+be+verified", res.headers["location"])
+
+

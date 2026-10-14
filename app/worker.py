@@ -51,7 +51,7 @@ def run_job_entry(run_id: int):
     with Session(engine) as session:
         run = session.get(Run, run_id)
         if run:
-            if run.status not in ("expired", "blocked"):
+            if run.status not in ("expired", "blocked", "failed"):
                 run.status = status
                 if err and status == "failed":
                     # Store failure reason (truncated, no secrets)

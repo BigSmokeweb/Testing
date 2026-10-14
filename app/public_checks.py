@@ -197,6 +197,18 @@ def run_public_checks(run_id: int) -> None:
         from app.admin import is_admin, get_admin_max_pages, get_admin_timeout_seconds, mask_email
         admin = run_user is not None and is_admin(run_user.email)
 
+        # Before running any run whose mode is not "quick", reload site and require
+        # site.verified_at to be set, unless the run owner is an admin.
+        is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
+        if run_mode != "quick" and not admin and not is_dev_skip and not site.verified_at:
+            run.status = "failed"
+            run.note = "Site is not verified"
+            run.finished_at = datetime.now(timezone.utc).isoformat()
+            session.add(run)
+            session.commit()
+            _worker_logger.warning("Run %s rejected by worker: site %s is not verified.", run_id, site.domain)
+            return
+
     # Apply elevated limits for admin; keep normal limits for everyone else.
     effective_max_pages = get_admin_max_pages() if admin else MAX_PAGES
     effective_budget_seconds = get_admin_timeout_seconds() if admin else MAX_BUDGET_SECONDS
