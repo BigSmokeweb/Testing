@@ -192,6 +192,19 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
     """
     from app.admin import is_admin
 
+    with Session(engine) as session_pre:
+        site = session_pre.get(Site, site_id)
+        if not site:
+            return None, "Site not found."
+        if site.user_id != user_id:
+            return None, "Unauthorized access to site."
+        site_url = site.url
+
+    # ── SSRF check — performed BEFORE taking concurrency locks ─────────
+    safe, reason = validate_url(site_url)
+    if not safe:
+        return None, f"Site URL is not safe to test: {reason}"
+
     user_lock = _get_user_lock(user_id)
     global_process_lock = _GLOBAL_QUICK_LOCK if mode == "quick" else _GLOBAL_FULL_LOCK
 
@@ -200,10 +213,8 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
         with global_process_lock:
             with Session(engine) as session:
                 site = session.get(Site, site_id)
-                if not site:
+                if not site or site.user_id != user_id:
                     return None, "Site not found."
-                if site.user_id != user_id:
-                    return None, "Unauthorized access to site."
 
                 # Lock user row or use advisory locks on PostgreSQL to prevent concurrency races.
                 # Always acquired in strict order: per-user lock first, then global cap lock.
@@ -232,11 +243,6 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
                         return None, "Site must be verified to run authenticated credentials tests."
                     if admin and not site.verified_at and not is_dev_skip:
                         limits_skipped.append("verification")
-
-                # ── SSRF check — never bypassed ───────────────────────────────────
-                safe, reason = validate_url(site.url)
-                if not safe:
-                    return None, f"Site URL is not safe to test: {reason}"
 
                 # ── Global browser / quick caps — always enforced, even for admins ──
                 active_statuses = ["queued", "running"]
