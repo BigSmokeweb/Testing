@@ -199,6 +199,18 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
         if site.user_id != user_id:
             return None, "Unauthorized access to site."
         site_url = site.url
+        site_verified_at = site.verified_at
+        user_pre = session_pre.get(User, user_id)
+        is_pre_admin = user_pre is not None and is_admin(user_pre.email)
+
+    is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
+
+    # ── Verification check — performed before network validation & locks ──
+    if mode != "quick":
+        if not site_verified_at and not is_dev_skip and not is_pre_admin:
+            return None, "Site ownership must be verified before running full crawl or authenticated tests."
+        if mode == "credentials" and not site_verified_at and not is_dev_skip and not is_pre_admin:
+            return None, "Site must be verified to run authenticated credentials tests."
 
     # ── SSRF check — performed BEFORE taking concurrency locks ─────────
     safe, reason = validate_url(site_url)
@@ -231,18 +243,9 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
                 # Determine admin status server-side — never from a request parameter.
                 admin = user is not None and is_admin(user.email)
 
-                is_dev_skip = os.getenv("LOCAL_MODE", "0") == "1" and os.getenv("SKIP_OWNERSHIP_FOR_DEV", "0") == "1"
-
                 limits_skipped = []  # for audit log
-
-                # ── Verification check ────────────────────────────────────────────
-                if mode != "quick":
-                    if not site.verified_at and not is_dev_skip and not admin:
-                        return None, "Site ownership must be verified before running full crawl or authenticated tests."
-                    if mode == "credentials" and not site.verified_at and not is_dev_skip and not admin:
-                        return None, "Site must be verified to run authenticated credentials tests."
-                    if admin and not site.verified_at and not is_dev_skip:
-                        limits_skipped.append("verification")
+                if mode != "quick" and admin and not site.verified_at and not is_dev_skip:
+                    limits_skipped.append("verification")
 
                 # ── Global browser / quick caps — always enforced, even for admins ──
                 active_statuses = ["queued", "running"]
