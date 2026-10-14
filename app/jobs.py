@@ -106,17 +106,19 @@ def check_quick_check_limits(session: Session, user_id: int, site: Site) -> Tupl
         return False, f"Daily limit of {MAX_QUICK_CHECKS_PER_USER_PER_DAY} quick checks reached for today. Verify domain to unlock full tests."
 
     # 2. Per-target-domain cap across all users (max 10/day)
+    from app.sites import normalize_domain
+    target_norm_domain = normalize_domain(site.domain)
     domain_quick_runs = session.exec(
         select(Run).where(
             Run.mode == "quick",
             Run.queued_at.startswith(today_prefix),
         )
     ).all()
-    # Filter by domain matching the target site's domain
+    # Filter by normalized domain matching the target site's normalized domain
     domain_count = 0
     for r in domain_quick_runs:
         s = session.get(Site, r.site_id) if r.site_id else None
-        if s and s.domain == site.domain:
+        if s and normalize_domain(s.domain) == target_norm_domain:
             domain_count += 1
     if domain_count >= MAX_QUICK_CHECKS_PER_DOMAIN_PER_DAY:
         return False, f"Daily quick-check limit of {MAX_QUICK_CHECKS_PER_DOMAIN_PER_DAY} reached for {site.domain} across all users. Please verify domain or try tomorrow."

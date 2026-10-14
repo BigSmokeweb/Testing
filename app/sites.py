@@ -13,6 +13,34 @@ import os
 MAX_SITES_PER_USER = int(os.getenv("MAX_SITES_PER_USER", "50"))
 
 
+def normalize_domain(host: str) -> str:
+    """
+    Normalizes a domain / host for comparison:
+    - Lowercase
+    - Strip port if present
+    - Strip trailing dots
+    - Strip leading 'www.'
+    - IDNA / Punycode encoding/decoding normalization
+    """
+    if not host:
+        return ""
+    h = host.strip().lower()
+    # Strip port if present
+    if ":" in h:
+        h = h.split(":")[0]
+    # Strip trailing dots
+    h = h.rstrip(".")
+    # Strip leading 'www.'
+    if h.startswith("www."):
+        h = h[4:]
+    # IDNA / Punycode normalization
+    try:
+        h = h.encode("idna").decode("ascii")
+    except Exception:
+        pass
+    return h
+
+
 def normalize_site_url(raw_url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Normalizes a given URL to scheme + domain (e.g., https://example.com).
@@ -32,6 +60,7 @@ def normalize_site_url(raw_url: str) -> Tuple[Optional[str], Optional[str], Opti
 
     norm_url = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
     return norm_url, domain, None
+
 
 
 def generate_verify_token() -> str:
@@ -156,7 +185,7 @@ def check_html_meta_tag(url: str, token: str) -> bool:
 def verify_site_ownership(site: Site) -> bool:
     import os
     # Refuse to verify root shared public suffixes directly (e.g. vercel.app itself)
-    domain_clean = site.domain.lower().strip()
+    domain_clean = normalize_domain(site.domain)
     if domain_clean in DISALLOWED_SHARED_PUBLIC_SUFFIXES:
         logger.warning(f"Refusing to verify shared public suffix domain: {domain_clean}")
         return False
@@ -217,11 +246,12 @@ def get_user_sites(user_id: int) -> list[Site]:
             select(Site).where(Site.user_id == user_id).order_by(Site.id.desc())
         ).all()
 
-    # Deduplicate: first-seen per domain wins because we iterate newest→oldest
+    # Deduplicate by normalized domain: first-seen per normalized domain wins because we iterate newest→oldest
     seen: set[str] = set()
     unique: list[Site] = []
     for site in all_sites:
-        if site.domain not in seen:
-            seen.add(site.domain)
+        norm_dom = normalize_domain(site.domain)
+        if norm_dom not in seen:
+            seen.add(norm_dom)
             unique.append(site)
     return unique

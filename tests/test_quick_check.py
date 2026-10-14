@@ -293,4 +293,22 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
                     self.assertIn("error=", res.headers["location"])
                     self.assertIn("must+be+verified", res.headers["location"])
 
+    def test_normalize_domain_cases(self):
+        from app.sites import normalize_domain
+
+        # Example.com -> example.com
+        self.assertEqual(normalize_domain("Example.com"), "example.com")
+        # www.example.com -> example.com
+        self.assertEqual(normalize_domain("www.example.com"), "example.com")
+        # example.com. -> example.com
+        self.assertEqual(normalize_domain("example.com."), "example.com")
+        # example.com:8080 -> example.com
+        self.assertEqual(normalize_domain("example.com:8080"), "example.com")
+        # Subdomain must stay different
+        self.assertEqual(normalize_domain("app.example.com"), "app.example.com")
+        self.assertNotEqual(normalize_domain("app.example.com"), normalize_domain("example.com"))
+        # Combination: www.Example.com.:8443
+        self.assertEqual(normalize_domain("www.Example.com.:8443"), "example.com")
+
+
 
