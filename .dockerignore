@@ -1,0 +1,38 @@
+# Python / virtual envs
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Testing / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
+
+# Editor / OS leftovers
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets & local config
+.env
+auth/
+config.yaml
+
+# Runtime artifacts & databases
+artifacts/
+*.db
+*.db.*
+*.sqlite*
+*.bak
+*.log
+security.log
+
+# Git internals
+.git/
+.gitignore
