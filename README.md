@@ -131,16 +131,31 @@ netfilter-persistent save
 > request dispatch, the host-level iptables rules above (or `scripts/block_worker_internal.sh`)
 > are required to drop any packets from the worker to private subnets at the kernel network layer.
 
-### 6. Postgres backups
+### 6. Postgres backups (encrypted with age)
+Install `age`:
 ```bash
-# Daily pg_dump via cron (runs as root or autoqa user)
+apt install -y age
+```
+
+Generate an age key pair on a secure offline machine (never store the private key on the server):
+```bash
+age-keygen -o autoqa_backup_key.txt
+# Public key: age1... (set this as AGE_RECIPIENT in server environment)
+```
+
+Configure daily backup via `scripts/backup_db.sh`:
+```bash
 crontab -e
 # Add:
-0 3 * * * docker compose -f /path/to/autoqa/docker-compose.yml exec -T postgres \
-  pg_dump -U autoqa autoqa | gzip > /backups/autoqa-$(date +\%Y\%m\%d).sql.gz
+0 3 * * * AGE_RECIPIENT="age1..." /path/to/autoqa/scripts/backup_db.sh /var/backups/autoqa
+```
 
-# Verify a backup restores:
-zcat /backups/autoqa-YYYYMMDD.sql.gz | docker compose exec -T postgres psql -U autoqa autoqa
+Backups are created with mode `0600` and retained for 14 days.
+
+#### Restore procedure
+Decrypt using your offline private key:
+```bash
+age -d -i autoqa_backup_key.txt /var/backups/autoqa/autoqa_YYYYMMDD_HHMMSS.sql.gz.age | gzip -d | docker compose exec -T postgres psql -U autoqa autoqa
 ```
 
 ### 7. Log rotation
