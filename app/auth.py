@@ -163,6 +163,29 @@ def delete_user_account(user_id: int) -> bool:
                 for fr in flow_results:
                     session.delete(fr)
 
+            # Collect any specific flat artifact files referenced by steps, traces, pages
+            specific_files = []
+            for p in pages:
+                if p.screenshot_path:
+                    specific_files.append(p.screenshot_path)
+            for fr in flow_results:
+                if fr.trace_path:
+                    specific_files.append(fr.trace_path)
+            if fr_ids:
+                for s in steps:
+                    if s.screenshot_path:
+                        specific_files.append(s.screenshot_path)
+
+            for sf in specific_files:
+                try:
+                    f_path = Path(sf)
+                    if not f_path.is_absolute():
+                        f_path = artifacts_base / f_path.name
+                    if f_path.is_file():
+                        f_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
             # Delete artifacts folders on disk for each run
             for rid in run_ids:
                 run_folder = artifacts_base / str(rid)
