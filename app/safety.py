@@ -86,12 +86,12 @@ def validate_url(url: str) -> Tuple[bool, str]:
     # Hostname resolution check
     resolved_ips = resolve_hostname_ips(hostname)
     if not resolved_ips:
-        return False, f"Cannot resolve hostname '{hostname}' to an IP address."
+        return False, "Cannot resolve hostname to an IP address."
 
     for ip in resolved_ips:
         blocked, reason = is_ip_blocked(ip)
         if blocked:
-            return False, f"Hostname '{hostname}' resolves to forbidden IP {ip}: {reason}"
+            return False, f"Hostname resolves to forbidden IP: {reason}"
 
     return True, ""
 

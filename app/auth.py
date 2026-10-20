@@ -57,6 +57,24 @@ def verify_csrf_token(token: str, session_id: str) -> bool:
         return False
 
 
+wizard_url_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="autoqa-wizard-url")
+
+WIZARD_URL_COOKIE_NAME = "autoqa_pending_url"
+WIZARD_URL_MAX_AGE = 15 * 60  # 15 minutes
+
+
+def create_wizard_url_token(url: str) -> str:
+    return wizard_url_serializer.dumps({"url": url})
+
+
+def verify_wizard_url_token(token: str) -> Optional[str]:
+    try:
+        data = wizard_url_serializer.loads(token, max_age=WIZARD_URL_MAX_AGE)
+        return data.get("url")
+    except (BadSignature, SignatureExpired, Exception):
+        return None
+
+
 def get_current_user_from_token(token: Optional[str]) -> Optional[User]:
     if not token:
         return None

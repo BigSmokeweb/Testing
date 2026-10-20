@@ -49,7 +49,12 @@ from app.auth import (
     verify_password,
     normalize_and_validate_email,
     invalidate_session,
+    WIZARD_URL_COOKIE_NAME,
+    WIZARD_URL_MAX_AGE,
+    create_wizard_url_token,
+    verify_wizard_url_token,
 )
+from fastapi import HTTPException
 
 limiter = Limiter(key_func=get_remote_address)
 _is_local = os.getenv("LOCAL_MODE", "0") == "1"
@@ -306,6 +311,17 @@ async def register_submit(request: Request):
 
     token = create_session_token(user_id, session_version=new_user.session_version)
     next_url = request.query_params.get("next") or "/"
+    
+    # Check pending wizard URL cookie
+    pending_tok = request.cookies.get(WIZARD_URL_COOKIE_NAME)
+    pending_url = verify_wizard_url_token(pending_tok) if pending_tok else None
+    if pending_url:
+        site, _ = add_site_for_user(user_id, pending_url)
+        if site:
+            next_url = f"/wizard?site={site.id}"
+        elif next_url == "/":
+            next_url = "/wizard"
+
     response = RedirectResponse(url=next_url, status_code=303)
     _secure = os.getenv("LOCAL_MODE", "0") != "1"
     response.set_cookie(
@@ -315,6 +331,8 @@ async def register_submit(request: Request):
         samesite="lax",
         secure=_secure,
     )
+    if pending_tok:
+        response.delete_cookie(key=WIZARD_URL_COOKIE_NAME, httponly=True, samesite="lax")
     return response
 
 
@@ -385,9 +403,19 @@ async def login_submit(request: Request):
             )
         user_id = user.id
 
-
     token = create_session_token(user_id, session_version=user.session_version)
     next_url = request.query_params.get("next") or "/"
+
+    # Check pending wizard URL cookie
+    pending_tok = request.cookies.get(WIZARD_URL_COOKIE_NAME)
+    pending_url = verify_wizard_url_token(pending_tok) if pending_tok else None
+    if pending_url:
+        site, _ = add_site_for_user(user_id, pending_url)
+        if site:
+            next_url = f"/wizard?site={site.id}"
+        elif next_url == "/":
+            next_url = "/wizard"
+
     response = RedirectResponse(url=next_url, status_code=303)
     _secure = os.getenv("LOCAL_MODE", "0") != "1"
     response.set_cookie(
@@ -397,6 +425,8 @@ async def login_submit(request: Request):
         samesite="lax",
         secure=_secure,
     )
+    if pending_tok:
+        response.delete_cookie(key=WIZARD_URL_COOKIE_NAME, httponly=True, samesite="lax")
     return response
 
 
@@ -826,39 +856,59 @@ async def wizard_start(request: Request):
         return HTMLResponse("Invalid CSRF token", status_code=400)
 
     url = parsed.get("url", [""])[0].strip()
-    from urllib.parse import quote_plus
     user = get_current_user(request)
+    _secure = os.getenv("LOCAL_MODE", "0") != "1"
+
     if not user:
-        # Redirect to register with target url preserved
-        return RedirectResponse(url=f"/register?next=/wizard%3Furl%3D{quote_plus(url)}", status_code=303)
-    return RedirectResponse(url=f"/wizard?url={quote_plus(url)}", status_code=303)
+        resp = RedirectResponse(url="/register", status_code=303)
+        if url:
+            tok = create_wizard_url_token(url)
+            resp.set_cookie(
+                key=WIZARD_URL_COOKIE_NAME,
+                value=tok,
+                max_age=WIZARD_URL_MAX_AGE,
+                httponly=True,
+                samesite="lax",
+                secure=_secure,
+            )
+        return resp
+
+    if url:
+        site, err = add_site_for_user(user.id, url)
+        if site:
+            return RedirectResponse(url=f"/wizard?site={site.id}", status_code=303)
+        from urllib.parse import quote_plus
+        return RedirectResponse(url=f"/wizard?error={quote_plus(err or 'Invalid URL')}", status_code=303)
+
+    return RedirectResponse(url="/wizard", status_code=303)
 
 
 @app.get("/wizard", response_class=HTMLResponse)
-def wizard_page(request: Request, url: str = "", site_id: int = None, error: str = None, success: str = None):
+def wizard_page(request: Request, site: int = None, site_id: int = None, error: str = None, success: str = None):
     user = get_current_user(request)
     if not user:
-        from urllib.parse import quote_plus
-        return RedirectResponse(url=f"/login?next=/wizard%3Furl%3D{quote_plus(url)}", status_code=303)
+        return RedirectResponse(url="/login", status_code=303)
 
     csrf_token = get_or_create_csrf(request)
-    site = None
+    site_obj = None
     step = 1
 
-    if site_id:
+    target_site_id = site if site is not None else site_id
+    if target_site_id is not None:
         with Session(db_engine) as session:
-            s = session.get(Site, site_id)
-            if s and s.user_id == user.id:
-                site = s
-                step = 3 if s.verified_at else 2
+            s = session.get(Site, target_site_id)
+            if not s or s.user_id != user.id:
+                raise HTTPException(status_code=404, detail="Site not found")
+            site_obj = s
+            step = 3 if s.verified_at else 2
 
     return templates.TemplateResponse(
         request=request,
         name="wizard.html",
         context={
             "step": step,
-            "site": site,
-            "target_url": url,
+            "site": site_obj,
+            "target_url": "",
             "csrf_token": csrf_token,
             "error": error,
             "success": success,
@@ -883,13 +933,12 @@ async def wizard_step1(request: Request):
     raw_url = parsed.get("url", [""])[0].strip()
     authorized = parsed.get("authorized", [""])[0]
     if not authorized:
-        from urllib.parse import quote_plus
-        return RedirectResponse(url=f"/wizard?url={quote_plus(raw_url)}&error=You+must+confirm+you+are+authorized+to+test+this+site", status_code=303)
+        return RedirectResponse(url="/wizard?error=You+must+confirm+you+are+authorized+to+test+this+site", status_code=303)
 
     site, err = add_site_for_user(user.id, raw_url)
     if err:
         from urllib.parse import quote_plus
-        return RedirectResponse(url=f"/wizard?url={quote_plus(raw_url)}&error={quote_plus(err)}", status_code=303)
+        return RedirectResponse(url=f"/wizard?error={quote_plus(err)}", status_code=303)
 
     action = parsed.get("action", ["verify"])[0]
     if action == "quick_check":
@@ -897,12 +946,10 @@ async def wizard_step1(request: Request):
         run, run_err = enqueue_run(user.id, site.id, mode="quick")
         if run_err:
             from urllib.parse import quote_plus
-            return RedirectResponse(url=f"/wizard?site_id={site.id}&error={quote_plus(run_err)}", status_code=303)
+            return RedirectResponse(url=f"/wizard?site={site.id}&error={quote_plus(run_err)}", status_code=303)
         return RedirectResponse(url=f"/progress/{run.id}", status_code=303)
 
-    if site.verified_at:
-        return RedirectResponse(url=f"/wizard?site_id={site.id}", status_code=303)
-    return RedirectResponse(url=f"/wizard?site_id={site.id}", status_code=303)
+    return RedirectResponse(url=f"/wizard?site={site.id}", status_code=303)
 
 
 @app.post("/wizard/step2/verify")
@@ -933,14 +980,14 @@ async def wizard_step2_verify(request: Request):
         if not site.verified_at:
             if not verify_site_ownership(site):
                 return RedirectResponse(
-                    url=f"/wizard?site_id={site_id}&error=Verification+failed.+Ensure+DNS+record+or+hosted+file+is+live.",
+                    url=f"/wizard?site={site_id}&error=Verification+failed.+Ensure+DNS+record+or+hosted+file+is+live.",
                     status_code=303
                 )
             site.verified_at = datetime.now(timezone.utc)
             session.add(site)
             session.commit()
 
-    return RedirectResponse(url=f"/wizard?site_id={site_id}&success=Domain+ownership+verified!", status_code=303)
+    return RedirectResponse(url=f"/wizard?site={site_id}&success=Domain+ownership+verified!", status_code=303)
 
 
 @app.get("/terms", response_class=HTMLResponse)
