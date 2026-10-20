@@ -33,8 +33,8 @@ class TestStep6Credentials(unittest.TestCase):
 
             site = Site(
                 user_id=user.id,
-                url="https://saucedemo.com",
-                domain="saucedemo.com",
+                url="https://login.example.com",
+                domain="login.example.com",
                 verify_token="tok_creds_test",
                 verified_at=datetime.now(timezone.utc),
             )
@@ -63,7 +63,7 @@ class TestStep6Credentials(unittest.TestCase):
         # 1. Store credentials
         cred = store_credentials(
             site_id=self.site_id,
-            login_url="https://saucedemo.com/login",
+            login_url="https://login.example.com/login",
             username="standard_user",
             password="secret_password_123",
         )
@@ -75,7 +75,7 @@ class TestStep6Credentials(unittest.TestCase):
         res = get_credentials(self.site_id)
         self.assertIsNotNone(res)
         url, u, p = res
-        self.assertEqual(url, "https://saucedemo.com/login")
+        self.assertEqual(url, "https://login.example.com/login")
         self.assertEqual(u, "standard_user")
         self.assertEqual(p, "secret_password_123")
 
@@ -85,7 +85,7 @@ class TestStep6Credentials(unittest.TestCase):
 
     def test_attempt_login_captcha_detection(self):
         mock_page = MagicMock()
-        mock_page.url = "https://saucedemo.com/login"
+        mock_page.url = "https://login.example.com/login"
         # Simulate captcha iframe found
         mock_loc = MagicMock()
         mock_loc.count.return_value = 1
@@ -93,17 +93,17 @@ class TestStep6Credentials(unittest.TestCase):
 
         success, reason = attempt_login(
             mock_page,
-            login_url="https://saucedemo.com/login",
+            login_url="https://login.example.com/login",
             username="user",
             password="pwd",
-            base_domain="saucedemo.com",
+            base_domain="login.example.com",
         )
         self.assertFalse(success)
         self.assertIn("CAPTCHA detected", reason)
 
     def test_attempt_login_mfa_detection(self):
         mock_page = MagicMock()
-        mock_page.url = "https://saucedemo.com/login"
+        mock_page.url = "https://login.example.com/login"
         # First return password and username locators, then after click return MFA input
         mock_user = MagicMock()
         mock_user.count.return_value = 1
@@ -138,10 +138,10 @@ class TestStep6Credentials(unittest.TestCase):
 
         success, reason = attempt_login(
             mock_page,
-            login_url="https://saucedemo.com/login",
+            login_url="https://login.example.com/login",
             username="user",
             password="pwd",
-            base_domain="saucedemo.com",
+            base_domain="login.example.com",
         )
         self.assertFalse(success)
         self.assertIn("MFA", reason)
@@ -156,7 +156,7 @@ class TestStep6Credentials(unittest.TestCase):
         # Store test creds
         store_credentials(
             site_id=self.site_id,
-            login_url="https://saucedemo.com/login",
+            login_url="https://login.example.com/login",
             username="standard_user",
             password="secret_sauce",
         )
@@ -173,7 +173,7 @@ class TestStep6Credentials(unittest.TestCase):
         mock_context = MagicMock()
         mock_browser.new_context.return_value = mock_context
         mock_page = MagicMock()
-        mock_page.url = "https://saucedemo.com/inventory.html"
+        mock_page.url = "https://login.example.com/inventory.html"
         mock_context.new_page.return_value = mock_page
 
         mock_resp = MagicMock()
