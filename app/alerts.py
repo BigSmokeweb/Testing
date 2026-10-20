@@ -22,7 +22,7 @@ def send_alert(run_id: int, engine: str, failed_flows: list, report_base_url: st
         return
 
     # Build summary message
-    lines = [f"*AutoQA Alert* — Run #{run_id} on `{engine}` has {len(failed_flows)} failure(s):"]
+    lines = [f"*AutoQA Alert* — Run #{run_id} has {len(failed_flows)} failure(s):"]
     for name in failed_flows:
         lines.append(f"  • {name}")
     lines.append(f"Report: {report_base_url}/report/{run_id}")

@@ -122,12 +122,12 @@ def check_quick_check_limits(session: Session, user_id: int, site: Site) -> Tupl
         if s and normalize_domain(s.domain) == target_norm_domain:
             domain_count += 1
     if domain_count >= MAX_QUICK_CHECKS_PER_DOMAIN_PER_DAY:
-        return False, f"Daily quick-check limit of {MAX_QUICK_CHECKS_PER_DOMAIN_PER_DAY} reached for {site.domain} across all users. Please verify domain or try tomorrow."
+        return False, "Quick checks for this site are limited right now. Try again later or verify the site."
 
     return True, ""
 
 
-def _log_admin_bypass(user_id: int, user_email: str, site_domain: str, limits_skipped: list) -> None:
+def _log_admin_bypass(user_id: int, user_email: str, site_id: int, limits_skipped: list) -> None:
     """Write one security-log line per admin bypass. No credentials in the message."""
     # Import here to avoid circular dependency with main.py
     try:
@@ -137,16 +137,16 @@ def _log_admin_bypass(user_id: int, user_email: str, site_domain: str, limits_sk
         masked = "***"
     skipped_str = ", ".join(limits_skipped)
     logger.info(
-        "ADMIN_BYPASS user_id=%s email=%s domain=%s skipped=[%s]",
-        user_id, masked, site_domain, skipped_str,
+        "ADMIN_BYPASS user_id=%s email=%s site_id=%s skipped=[%s]",
+        user_id, masked, site_id, skipped_str,
     )
     # Also write to security.log via the file handler set up in main.py
     try:
         import logging as _logging
         sec = _logging.getLogger("autoqa_security")
         sec.info(
-            "EVENT=ADMIN_BYPASS user_id=%s email=%s domain=%s skipped=[%s]",
-            user_id, masked, site_domain, skipped_str,
+            "EVENT=ADMIN_BYPASS user_id=%s email=%s site_id=%s skipped=[%s]",
+            user_id, masked, site_id, skipped_str,
         )
     except Exception:
         pass
@@ -298,7 +298,7 @@ def enqueue_run(user_id: int, site_id: int, mode: str = "public") -> Tuple[Optio
 
                 # ── Audit log ─────────────────────────────────────────────────────
                 if admin and limits_skipped and user:
-                    _log_admin_bypass(user_id, user.email, site.domain, limits_skipped)
+                    _log_admin_bypass(user_id, user.email, site.id, limits_skipped)
 
                 now_str = datetime.now(timezone.utc).isoformat()
                 run = Run(

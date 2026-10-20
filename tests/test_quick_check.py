@@ -136,7 +136,7 @@ class TestQuickCheckAndMetaVerification(unittest.TestCase):
         with patch("app.jobs.validate_url", return_value=(True, "")):
             run, err = enqueue_run(other_user_id, other_site_id, mode="quick")
             self.assertIsNone(run)
-            self.assertIn("Daily quick-check limit of 10 reached", err)
+            self.assertIn("Quick checks for this site are limited right now", err)
 
     @patch("app.safety.safe_http_fetch")
     def test_meta_tag_verification_success_case_insensitive_and_quotes(self, mock_fetch):

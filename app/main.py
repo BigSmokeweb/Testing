@@ -710,7 +710,7 @@ async def add_site(request: Request):
 
     site, err = add_site_for_user(user.id, raw_url)
     if err:
-        log_security_event("BLOCKED_URL_OR_INVALID_SITE", get_remote_address(request), f"url={raw_url} reason={err}")
+        log_security_event("BLOCKED_URL_OR_INVALID_SITE", get_remote_address(request), f"reason={err}")
         from urllib.parse import quote_plus
         return RedirectResponse(url=f"/sites?error={quote_plus(err)}", status_code=303)
 

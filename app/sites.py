@@ -86,7 +86,7 @@ def check_dns_txt_record(domain: str, token: str) -> bool:
                 if txt_string.decode("utf-8").strip() == expected:
                     return True
     except Exception as e:
-        logger.warning(f"DNS TXT resolution failed for {record_name}: {e}")
+        logger.warning("DNS TXT resolution failed: %s", type(e).__name__)
     return False
 
 
@@ -107,7 +107,7 @@ def check_well_known_file(url: str, token: str) -> bool:
         if status_code == 200 and content.decode("utf-8", errors="ignore").strip() == token:
             return True
     except Exception as e:
-        logger.warning(f"Well-known verification fetch failed for {file_url}: {e}")
+        logger.warning("Well-known verification fetch failed: %s", type(e).__name__)
     return False
 
 
@@ -178,7 +178,7 @@ def check_html_meta_tag(url: str, token: str) -> bool:
         parser.feed(head_snippet)
         return parser.found
     except Exception as e:
-        logger.warning(f"Meta tag verification failed for {url}: {e}")
+        logger.warning("Meta tag verification failed: %s", type(e).__name__)
         return False
 
 
@@ -187,7 +187,7 @@ def verify_site_ownership(site: Site) -> bool:
     # Refuse to verify root shared public suffixes directly (e.g. vercel.app itself)
     domain_clean = normalize_domain(site.domain)
     if domain_clean in DISALLOWED_SHARED_PUBLIC_SUFFIXES:
-        logger.warning(f"Refusing to verify shared public suffix domain: {domain_clean}")
+        logger.warning("Refusing to verify shared public suffix domain")
         return False
 
     # SKIP_OWNERSHIP_FOR_DEV is honored ONLY when LOCAL_MODE=1, strictly ignored in production

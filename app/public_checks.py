@@ -206,7 +206,7 @@ def run_public_checks(run_id: int) -> None:
             run.finished_at = datetime.now(timezone.utc).isoformat()
             session.add(run)
             session.commit()
-            _worker_logger.warning("Run %s rejected by worker: site %s is not verified.", run_id, site.domain)
+            _worker_logger.warning("Run %s rejected by worker: site_id %s is not verified.", run_id, site.id)
             return
 
     # Apply elevated limits for admin; keep normal limits for everyone else.
@@ -216,14 +216,14 @@ def run_public_checks(run_id: int) -> None:
     if admin:
         masked = mask_email(run_user.email) if run_user else "***"
         _worker_logger.info(
-            "ADMIN_BYPASS run_id=%s user=%s domain=%s pages_cap=%s timeout=%ss",
-            run_id, masked, base_domain, effective_max_pages, effective_budget_seconds,
+            "ADMIN_BYPASS run_id=%s user=%s site_id=%s pages_cap=%s timeout=%ss",
+            run_id, masked, site.id, effective_max_pages, effective_budget_seconds,
         )
         try:
             sec = _logging.getLogger("autoqa_security")
             sec.info(
-                "EVENT=ADMIN_BYPASS_WORKER run_id=%s user=%s domain=%s pages_cap=%s timeout=%ss",
-                run_id, masked, base_domain, effective_max_pages, effective_budget_seconds,
+                "EVENT=ADMIN_BYPASS_WORKER run_id=%s user=%s site_id=%s pages_cap=%s timeout=%ss",
+                run_id, masked, site.id, effective_max_pages, effective_budget_seconds,
             )
         except Exception:
             pass
