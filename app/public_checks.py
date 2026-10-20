@@ -367,7 +367,7 @@ def run_public_checks(run_id: int) -> None:
                     has_errors = (not is_ok) or (len(collector.console_errors) > 0)
                     try:
                         if has_errors or crawled_pages_count == 1:
-                            shot_filename = f"page_{crawled_pages_count}_{int(time.time()*1000)}.png"
+                            shot_filename = f"{uuid.uuid4().hex}.png"
                             shot_path = run_artifacts_dir / shot_filename
                             page.screenshot(path=str(shot_path), full_page=False)
                             screenshot_rel_path = f"artifacts/{run_id}/{shot_filename}"

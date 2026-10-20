@@ -13,6 +13,7 @@ from app.monitors import MonitorCollector, attach, record_load_time
 from app.session import is_valid as is_session_valid
 from app.models import save_run, init_db
 from app.alerts import send_alert
+import uuid
 
 AUTH_STATE_PATH = Path("auth/state.json")
 ARTIFACTS_DIR = Path("artifacts")
@@ -60,8 +61,7 @@ def load_flow_module(flow_path: str):
 def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
     config = load_config()
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = int(time.time() * 1000)
-    trace_file = ARTIFACTS_DIR / f"{Path(module.__file__).stem}_attempt{attempt_num}_{timestamp}.zip"
+    trace_file = ARTIFACTS_DIR / f"{uuid.uuid4().hex}.zip"
 
     steps: List[StepResult] = []
     has_failed = False
@@ -113,7 +113,7 @@ def _execute_attempt(module, engine: str, attempt_num: int) -> FlowResult:
             except Exception as e:
                 has_failed = True
                 duration = int((time.time() - step_start) * 1000)
-                shot_path = ARTIFACTS_DIR / f"fail_{Path(module.__file__).stem}_{timestamp}.png"
+                shot_path = ARTIFACTS_DIR / f"{uuid.uuid4().hex}.png"
                 try:
                     page.screenshot(path=str(shot_path))
                     saved_shot = str(shot_path)
