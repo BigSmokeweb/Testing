@@ -246,12 +246,23 @@
   Show {{ ok_pages | length }} OK page(s)
 </button>
 <div class="ok-pages-list" id="ok-pages-list">
-  <div class="card" style="margin-top:var(--sp-3);">
     {% for page in ok_pages %}
-    <div style="display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3) 0;border-bottom:1px solid rgba(51,65,85,0.4);" {% if loop.last %}style="border:none;"{% endif %}>
-      <span class="badge badge-passed">{{ page.status_code or 'OK' }}</span>
-      <span style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ page.url }}</span>
-      {% if page.load_ms %}<span style="font-size:12px;color:var(--text-faint);white-space:nowrap;margin-left:auto;">{{ page.load_ms | int }}ms</span>{% endif %}
+    <div class="page-row" id="page-ok-{{ loop.index }}" style="margin-bottom:var(--sp-2);">
+      <div class="page-row-header" onclick="togglePageRow(this.parentElement)" aria-expanded="false" role="button" tabindex="0"
+           onkeydown="if(event.key==='Enter'||event.key===' ')togglePageRow(this.parentElement)">
+        <span class="badge badge-passed" style="flex-shrink:0;">{{ page.status_code or 'OK' }}</span>
+        <span class="page-url" title="{{ page.url }}">{{ page.url }}</span>
+        {% if page.load_ms %}<span style="font-size:12px;color:var(--text-faint);white-space:nowrap;">{{ page.load_ms | int }}ms</span>{% endif %}
+        {% if page.screenshot_path %}<span class="badge" style="background:rgba(255,255,255,0.06);color:var(--text-muted);font-size:11px;">📷 Screenshot</span>{% endif %}
+        <span class="page-row-chevron" aria-hidden="true">▼</span>
+      </div>
+      <div class="page-row-body">
+        {% if page.screenshot_path %}
+          <img src="/artifacts/{{ page.screenshot_path | basename }}" alt="Screenshot of {{ page.url }}" class="screenshot-preview" loading="lazy" data-screenshot-src="/artifacts/{{ page.screenshot_path | basename }}" data-screenshot-alt="Screenshot of {{ page.url }}" title="Click to view full size">
+        {% else %}
+          <p style="font-size:12px;color:var(--text-faint);">No screenshot captured.</p>
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
   </div>

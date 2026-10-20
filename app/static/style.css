@@ -1175,9 +1175,10 @@ td code {
 
 /* ── Progress Page ───────────────────────────────────────────────────────── */
 .progress-page {
-  max-width: 640px;
-  margin: var(--s7) auto;
-  padding: 0 var(--s5);
+  max-width: 1200px;
+  width: 95%;
+  margin: var(--s5) auto;
+  padding: 0 var(--s4);
   text-align: center;
 }
 

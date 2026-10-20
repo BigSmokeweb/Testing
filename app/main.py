@@ -77,7 +77,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
@@ -181,7 +181,14 @@ def get_artifact(request: Request, file_path: str):
             if os.getenv("LOCAL_MODE", "0") != "1":
                 return HTMLResponse("Artifact not found", status_code=404)
 
-    return FileResponse(resolved_path)
+    # No-cache for live streaming frames so browser always fetches fresh
+    headers = {}
+    if resolved_path.name == "live_frame.png":
+        headers = {
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        }
+    return FileResponse(resolved_path, headers=headers)
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -201,6 +208,33 @@ templates.env.filters["basename"] = basename_filter
 templates.env.filters["tojson"] = tojson_filter
 
 
+def _sync_admin_user_from_env():
+    """Create or update admin user from ADMIN_EMAILS + ADMIN_PASSWORD env vars."""
+    admin_email = os.getenv("ADMIN_EMAILS", "").split(",")[0].strip()
+    admin_password = os.getenv("ADMIN_PASSWORD", "").strip()
+    if not admin_email or not admin_password:
+        return
+    import logging as _log
+    _lg = _log.getLogger("autoqa_startup")
+    try:
+        with Session(db_engine) as s:
+            user = s.exec(select(User).where(User.email == admin_email)).first()
+            new_hash = hash_password(admin_password)
+            if user:
+                user.password_hash = new_hash
+                s.add(user)
+                s.commit()
+                _lg.info("Admin password synced for %s", admin_email)
+            else:
+                user = User(email=admin_email, password_hash=new_hash)
+                s.add(user)
+                s.commit()
+                _lg.info("Admin user created: %s", admin_email)
+    except Exception as e:
+        import logging as _log2
+        _log2.getLogger("autoqa_startup").error("Admin sync failed: %s", e)
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
@@ -208,6 +242,8 @@ def on_startup():
     get_fernet()
     from app.admin import warn_unregistered_admin_emails
     warn_unregistered_admin_emails()
+    # Ensure admin user exists with correct password from env
+    _sync_admin_user_from_env()
 
 
 def get_current_user(request: Request):
@@ -1083,16 +1119,29 @@ def get_run_status(request: Request, run_id: int):
         if not run or not verify_run_ownership(run, user):
             return JSONResponse({"error": "Not found"}, status_code=404)
 
-        # Count pages checked so far
+        # Count pages checked so far and get latest crawled page
         from app.models import Page as PageModel
         pages_count = 0
+        latest_page = None
         try:
             from sqlmodel import func
             pages_count = session.exec(
                 select(func.count()).where(PageModel.run_id == run.id)
             ).one()
+            latest_page = session.exec(
+                select(PageModel).where(PageModel.run_id == run.id).order_by(PageModel.id.desc())
+            ).first()
         except Exception:
             pass
+
+        live_frame_exists = (ARTIFACTS_DIR / str(run.id) / "live_frame.png").is_file()
+
+        site_url = ""
+        if run.site_id:
+            from app.models import Site as SiteModel
+            site_obj = session.get(SiteModel, run.site_id)
+            if site_obj:
+                site_url = site_obj.url
 
         return JSONResponse({
             "id": run.id,
@@ -1101,6 +1150,8 @@ def get_run_status(request: Request, run_id: int):
             "started_at": run.started_at,
             "finished_at": run.finished_at,
             "pages_checked": pages_count,
+            "current_url": latest_page.url if latest_page else site_url,
+            "has_live_frame": live_frame_exists,
         })
 
 

@@ -52,6 +52,42 @@
     </div>
   </div>
 
+  <!-- ── YouTube-Style Live Stream Player ─────────────────────────────── -->
+  <div class="live-stream-card" id="live-stream-card" style="margin:var(--s5) auto;max-width:1120px;width:100%;background:#000;border-radius:14px;overflow:hidden;border:1px solid var(--separator);box-shadow:0 12px 48px rgba(0,0,0,0.55);text-align:left;transition:all 0.3s ease;">
+    <!-- Top Stream Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#111;border-bottom:1px solid #222;">
+      <div style="display:flex;align-items:center;gap:12px;overflow:hidden;">
+        <span style="display:inline-flex;align-items:center;gap:6px;background:#e50914;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:0.05em;text-transform:uppercase;flex-shrink:0;">
+          <span style="width:6px;height:6px;border-radius:50%;background:#fff;animation:pulse 1s infinite;"></span> LIVE
+        </span>
+        <span style="font-size:14px;font-weight:600;color:#f0f6fc;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="live-target-url">Connecting Playwright Chromium engine…</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">
+        <span style="font-size:12px;color:#8b949e;" id="stream-fps">1080p · 60 FPS Live</span>
+        <button type="button" id="toggle-fullscreen-btn" onclick="toggleStreamFullscreen()" style="background:#222;border:1px solid #444;color:#ddd;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg> Fullscreen
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Video Screen -->
+    <div id="live-stream-viewport" style="position:relative;width:100%;aspect-ratio:16/9;min-height:480px;background:#050505;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+      <img id="live-stream-img" src="/artifacts/{{ run.id }}/live_frame.png" alt="Live browser test feed" style="width:100%;height:100%;object-fit:contain;display:none;">
+      
+      <!-- Placeholder when stream initializing -->
+      <div id="live-stream-placeholder" style="text-align:center;color:#8b949e;padding:20px;">
+        <div class="progress-spinner" style="width:40px;height:40px;margin-bottom:12px;"></div>
+        <p style="margin:0;font-size:13px;font-weight:500;">Starting Playwright browser session…</p>
+        <p style="margin:4px 0 0;font-size:11px;color:#555;">Live frames stream here in real-time as pages load</p>
+      </div>
+
+      <!-- Watermark overlay -->
+      <div style="position:absolute;bottom:12px;right:14px;background:rgba(0,0,0,0.65);padding:4px 10px;border-radius:4px;font-size:11px;font-family:var(--font-mono);color:#aaa;backdrop-filter:blur(4px);pointer-events:none;">
+        AutoQA Headless Chromium · Run #{{ run.id }}
+      </div>
+    </div>
+  </div>
+
   {% if run.status in ['failed', 'expired'] %}
   <a href="/sites" class="btn btn-ghost" style="margin:0 auto;">← Back to My Sites</a>
   {% elif run.status == 'completed' %}
@@ -63,14 +99,20 @@
 <script>
 (function () {
   var runId    = {{ run.id }};
-  var status   = {{ run.status | tojson }};
-  var startedAt = {{ run.started_at | tojson if run.started_at else 'null' }};
+  var status   = {{ run.status | tojson | safe }};
+  var startedAt = {{ (run.started_at | tojson | safe) if run.started_at else 'null' }};
   var interval = null;
   var pollFailures = 0;
 
-  // Elapsed timer
+  // Elapsed timer — normalize ISO timestamp before parsing
   var elapsedEl = document.getElementById('prog-elapsed');
-  var startTs = startedAt ? new Date(startedAt + (startedAt.endsWith('Z') ? '' : 'Z')).getTime() : null;
+  var startTs = null;
+  if (startedAt) {
+    // Strip timezone offset (+HH:MM or -HH:MM) and replace with Z for safe parsing
+    var normalized = startedAt.replace(/([+-]\d{2}:\d{2}|Z?)$/, 'Z').replace(/ZZ$/, 'Z');
+    var d = new Date(normalized);
+    if (!isNaN(d.getTime())) startTs = d.getTime();
+  }
 
   function formatElapsed(ms) {
     var s = Math.floor(ms / 1000);
@@ -112,6 +154,12 @@
     if (st) st.textContent = statusMap[status] || status;
     if (sb) sb.textContent = subMap[status] || '';
 
+    // Update elapsed from API start time if we didn't have it from template
+    if (!startTs && data.started_at) {
+      var d2 = new Date(data.started_at.replace(/([+-]\d{2}:\d{2}|Z?)$/, 'Z').replace(/ZZ$/, 'Z'));
+      if (!isNaN(d2.getTime())) { startTs = d2.getTime(); startElapsedTimer(); }
+    }
+
     if (data.status === 'completed') {
       clearInterval(interval);
       if (timerTick) clearInterval(timerTick);
@@ -125,15 +173,52 @@
   }
 
   function poll() {
-    fetch('/runs/' + runId + '/status')
-      .then(function (r) { return r.json(); })
+    fetch('/runs/' + runId + '/status', { credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.status === 401) {
+          // Session expired — redirect to login then back
+          clearInterval(interval);
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+          return null;
+        }
+        return r.json();
+      })
       .then(function (data) {
+        if (!data) return;
         pollFailures = 0;
         applyStatus(data);
-        // update page count if available
+        // update page count
         if (data.pages_checked !== undefined) {
           var pe = document.getElementById('prog-pages');
           if (pe) pe.textContent = data.pages_checked;
+        }
+
+        // Live stream update
+        var urlLabel = document.getElementById('live-target-url');
+        if (urlLabel && data.current_url) {
+          urlLabel.textContent = data.current_url;
+        }
+
+        if (data.has_live_frame) {
+          var liveImg = document.getElementById('live-stream-img');
+          var placeholder = document.getElementById('live-stream-placeholder');
+          if (liveImg) {
+            var newSrc = '/artifacts/' + runId + '/live_frame.png?t=' + Date.now();
+            var preloader = new Image();
+            preloader.onload = function () {
+              liveImg.src = newSrc;
+              liveImg.style.display = 'block';
+              if (placeholder) placeholder.style.display = 'none';
+            };
+            preloader.onerror = function () {
+              // Only hide if the image never loaded any frame before
+              if (!liveImg.src || liveImg.style.display === 'none') {
+                liveImg.style.display = 'none';
+                if (placeholder) placeholder.style.display = 'flex';
+              }
+            };
+            preloader.src = newSrc;
+          }
         }
       })
       .catch(function () {
@@ -153,7 +238,7 @@
   if (status === 'queued' || status === 'running') {
     startElapsedTimer();
     poll();
-    interval = setInterval(poll, 3000);
+    interval = setInterval(poll, 1500);
   } else if (startTs && elapsedEl && status === 'completed') {
     // Show final duration
     if ({{ run.duration_ms or 0 }}) {
@@ -161,5 +246,22 @@
     }
   }
 })();
+function toggleStreamFullscreen() {
+  var vp = document.getElementById('live-stream-viewport') || document.getElementById('live-stream-card');
+  if (!vp) return;
+  if (!document.fullscreenElement) {
+    if (vp.requestFullscreen) {
+      vp.requestFullscreen();
+    } else if (vp.webkitRequestFullscreen) {
+      vp.webkitRequestFullscreen();
+    }
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  }
+}
 </script>
 {% endblock %}
+
+

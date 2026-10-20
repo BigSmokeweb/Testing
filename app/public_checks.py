@@ -1,6 +1,8 @@
 import os
+import shutil
 import sys
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,9 +22,9 @@ from app.safety import install_request_guard, validate_url, safe_http_fetch
 
 _worker_logger = _logging.getLogger("autoqa_worker")
 
-MAX_PAGES = 25
-MAX_DEPTH = 2
-MAX_BUDGET_SECONDS = 300  # 5 minutes
+MAX_PAGES = 500
+MAX_DEPTH = 5
+MAX_BUDGET_SECONDS = 900  # 15 minutes
 ARTIFACTS_DIR = Path("artifacts")
 
 
@@ -257,9 +259,18 @@ def run_public_checks(run_id: int) -> None:
             flow_result_id = fr.id
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+            context = browser.new_context(viewport={"width": 1280, "height": 720})
             install_request_guard(context)
+            _live_frame_written = False
 
             try:
                 # Mode A: Test-credentials login
@@ -363,15 +374,23 @@ def run_public_checks(run_id: int) -> None:
                     if is_ok:
                         ok_pages_count += 1
 
-                    # Screenshots: on HTTP error, exception error, console errors, or first page
-                    has_errors = (not is_ok) or (len(collector.console_errors) > 0)
+                    # Screenshots: capture for every page checked
                     try:
-                        if has_errors or crawled_pages_count == 1:
-                            shot_filename = f"{uuid.uuid4().hex}.png"
-                            shot_path = run_artifacts_dir / shot_filename
-                            page.screenshot(path=str(shot_path), full_page=False)
-                            screenshot_rel_path = f"artifacts/{run_id}/{shot_filename}"
-                    except Exception:
+                        shot_filename = f"{uuid.uuid4().hex}.png"
+                        shot_path = run_artifacts_dir / shot_filename
+                        page.screenshot(path=str(shot_path), full_page=False)
+                        screenshot_rel_path = f"artifacts/{run_id}/{shot_filename}"
+                        # Save live stream frame (always overwrite with latest)
+                        try:
+                            shutil.copyfile(str(shot_path), str(run_artifacts_dir / "live_frame.png"))
+                            _live_frame_written = True  # noqa: F841
+                        except Exception as _copy_err:
+                            _worker_logger.warning("live_frame copy failed run=%s: %s", run_id, _copy_err)
+                    except Exception as _shot_err:
+                        _worker_logger.warning(
+                            "screenshot failed run=%s url=%s error=%s",
+                            run_id, norm_current, _shot_err,
+                        )
                         screenshot_rel_path = None
 
                     page.close()

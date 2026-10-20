@@ -2,7 +2,8 @@
 # Serves https://{$DOMAIN} and reverse-proxies to the web service.
 # Caddy automatically obtains and renews TLS certificates via Let's Encrypt.
 
-{$DOMAIN} {
+{$DOMAIN:localhost} {
+    # If serving localhost, Caddy automatically uses local self-signed or HTTP
     # Reverse proxy to the FastAPI web service
     reverse_proxy web:8000
 
@@ -13,7 +14,7 @@
         X-Frame-Options           "DENY"
         Referrer-Policy           "no-referrer"
         X-Robots-Tag              "noindex, nofollow"
-        Content-Security-Policy   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+        Content-Security-Policy   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
         Permissions-Policy        "geolocation=(), microphone=(), camera=()"
         -Server
     }
@@ -30,6 +31,5 @@
         format json {
             time_format iso8601
         }
-        exclude /static/*
     }
 }

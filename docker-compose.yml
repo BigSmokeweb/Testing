@@ -58,6 +58,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
+    ports:
+      - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-autoqa}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-autoqa}
       REDIS_URL:    redis://redis:6379/0
@@ -66,6 +68,7 @@ services:
       LOCAL_MODE:   ${LOCAL_MODE:-0}
       SKIP_OWNERSHIP_FOR_DEV: ${SKIP_OWNERSHIP_FOR_DEV:-0}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_MAX_PAGES: ${ADMIN_MAX_PAGES:-100}
       ADMIN_RUN_TIMEOUT_SECONDS: ${ADMIN_RUN_TIMEOUT_SECONDS:-900}
     volumes:
@@ -97,8 +100,8 @@ services:
       FERNET_KEY:   ${FERNET_KEY:?err}
       SKIP_OWNERSHIP_FOR_DEV: ${SKIP_OWNERSHIP_FOR_DEV:-0}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
-      ADMIN_MAX_PAGES: ${ADMIN_MAX_PAGES:-100}
-      ADMIN_RUN_TIMEOUT_SECONDS: ${ADMIN_RUN_TIMEOUT_SECONDS:-900}
+      ADMIN_MAX_PAGES: ${ADMIN_MAX_PAGES:-500}
+      ADMIN_RUN_TIMEOUT_SECONDS: ${ADMIN_RUN_TIMEOUT_SECONDS:-1800}
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     volumes:
       - ./app:/app/app:ro
